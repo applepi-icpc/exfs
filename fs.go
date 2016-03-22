@@ -47,10 +47,13 @@ func (fs *Exfs) createINode(mode uint32, uid uint32, gid uint32) (blkID uint64, 
 	inoB := ino.Marshal()
 	err = fs.blockManager.SetBlock(blkID, inoB)
 	if err != nil {
-		fs.blockManager.RemoveBlock(blkID) // ignore error
+		// fs.blockManager.rollback()
 		blkID = 0
 		ino = INode{}
+	} else {
+		// fs.blockManager.commit()
 	}
+
 	return
 }
 
