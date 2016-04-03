@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 )
 
@@ -32,6 +33,19 @@ func (d Directory) Marshal() []byte {
 	return res
 }
 
+var (
+	ErrNotFound = fmt.Errorf("not found")
+)
+
+func (d Directory) FindEntry(name string) (ID uint64, err error) {
+	for _, v := range d {
+		if v.Filename == name {
+			return v.INodeID, nil
+		}
+	}
+	return 0, ErrNotFound
+}
+
 func UnmarshalDirectory(data []byte) (Directory, error) {
 	d := make(Directory, 0)
 	err := json.Unmarshal(data, d)
@@ -59,11 +73,11 @@ func (ino INode) Marshal() []byte {
 	return res
 }
 
-func UnmarshalINode(data []byte) (INode, error) {
+func UnmarshalINode(data []byte) (*INode, error) {
 	var ino INode
 	err := json.Unmarshal(data, &ino)
 	if err != nil {
-		return INode{}, err
+		return &INode{}, err
 	}
-	return ino, nil
+	return &ino, nil
 }

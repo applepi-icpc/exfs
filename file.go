@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
@@ -48,6 +50,7 @@ func (f *ExfsFile) Read(dest []byte, off int64) (fuse.ReadResult, fuse.Status) {
 	if off < 0 {
 		return fuse.ReadResultData(nil), fuse.EINVAL
 	}
+
 	end := int64(off) + int64(len(dest))
 	if end > int64(f.inode.Size) {
 		end = int64(f.inode.Size)
@@ -317,13 +320,15 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 	defer f.lock.Unlock()
 
 	succeed := false
-	// defer func() {
-	// 	if succeed {
-	// 		// TODO: f.fs.blockManager.commit()
-	// 	} else {
-	// 		// TODO: f.fs.blockManager.rollback()
-	// 	}
-	// }()
+	defer func() {
+		if succeed {
+			f.inode.Mtime = uint64(time.Now().Unix())
+			f.saveINode()
+			// TODO: f.fs.blockManager.commit()
+		} else {
+			// TODO: f.fs.blockManager.rollback()
+		}
+	}()
 
 	if !f.opening {
 		return 0, fuse.EBADF
@@ -438,4 +443,145 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 			}
 		}
 	}
+}
+
+func (f *ExfsFile) Flush() fuse.Status {
+	return fuse.OK
+}
+
+func (f *ExfsFile) Release() {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	f.opening = false
+}
+
+func (f *ExfsFile) Close() {
+	f.Flush()
+	f.Release()
+}
+
+func (f *ExfsFile) Fsync(flags int) (code fuse.Status) {
+	return fuse.OK
+}
+
+func (f *ExfsFile) Truncate(size uint64) fuse.Status {
+	if !f.opening {
+		return fuse.EBADF
+	}
+	if size < 0 {
+		return fuse.EINVAL
+	}
+
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	err := f.setSize(size)
+	if err != nil {
+		return fuse.EIO
+	}
+
+	f.inode.Mtime = uint64(time.Now().Unix())
+	f.saveINode()
+	return fuse.OK
+}
+
+func (f *ExfsFile) GetAttr(out *fuse.Attr) fuse.Status {
+	if !f.opening {
+		return fuse.EBADF
+	}
+
+	f.lock.RLock()
+	defer f.lock.RUnlock()
+
+	out.Size = f.inode.Size
+	blkSize := int64(f.fs.blockManager.Blocksize())
+	if blkSize != int64(SizeUnlimited) {
+		out.Blocks = uint64(len(f.inode.Blocks))
+		out.Blksize = uint32(blkSize)
+	}
+	out.Atime = f.inode.Atime
+	out.Mtime = f.inode.Mtime
+	out.Ctime = f.inode.Ctime
+	out.Mode = f.inode.Mode
+	out.Owner.Gid = f.inode.Gid
+	out.Owner.Uid = f.inode.Uid
+	return fuse.OK
+}
+
+func (f *ExfsFile) Chown(uid uint32, gid uint32) fuse.Status {
+	if !f.opening {
+		return fuse.EBADF
+	}
+
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	f.inode.Gid = gid
+	f.inode.Uid = uid
+	f.inode.Ctime = uint64(time.Now().Unix())
+	err := f.saveINode()
+	if err != nil {
+		return fuse.EIO
+	}
+	return fuse.OK
+}
+
+func (f *ExfsFile) Chmod(perms uint32) fuse.Status {
+	if !f.opening {
+		return fuse.EBADF
+	}
+
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	oldPerm := f.inode.Mode & 0777
+	f.inode.Mode ^= oldPerm
+	f.inode.Mode |= perms & 0777
+	f.inode.Ctime = uint64(time.Now().Unix())
+	err := f.saveINode()
+	if err != nil {
+		return fuse.EIO
+	}
+	return fuse.OK
+}
+
+func (f *ExfsFile) Utimens(atime *time.Time, mtime *time.Time) fuse.Status {
+	if !f.opening {
+		return fuse.EBADF
+	}
+
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	f.inode.Atime = uint64(atime.Unix())
+	f.inode.Mtime = uint64(mtime.Unix())
+	f.inode.Ctime = uint64(time.Now().Unix())
+	err := f.saveINode()
+	if err != nil {
+		return fuse.EIO
+	}
+	return fuse.OK
+}
+
+func (f *ExfsFile) Allocate(off uint64, size uint64, mode uint32) (code fuse.Status) {
+	if !f.opening {
+		return fuse.EBADF
+	}
+
+	// default or FALLOC_FL_KEEP_SIZE
+	if mode != 0 && mode != 1 {
+		return fuse.Status(syscall.EOPNOTSUPP)
+	}
+
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	if off+size > f.inode.Size && mode == 0 {
+		err := f.setSize(off + size)
+		if err != nil {
+			return fuse.EIO
+		}
+	}
+
+	return fuse.OK
 }

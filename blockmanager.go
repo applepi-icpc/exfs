@@ -5,7 +5,8 @@ import (
 )
 
 var (
-	ErrNoBlock = fmt.Errorf("no such block")
+	ErrNoBlock      = fmt.Errorf("no such block")
+	ErrNoMoreBlocks = fmt.Errorf("no more blocks")
 )
 
 const (
