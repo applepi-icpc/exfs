@@ -48,7 +48,7 @@ func (d Directory) FindEntry(name string) (ID uint64, err error) {
 
 func UnmarshalDirectory(data []byte) (Directory, error) {
 	d := make(Directory, 0)
-	err := json.Unmarshal(data, d)
+	err := json.Unmarshal(data, &d)
 	if err != nil {
 		return nil, err
 	}

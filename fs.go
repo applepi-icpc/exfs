@@ -32,7 +32,7 @@ func NewExfs(blockManager BlockManager, root uint64, newFS bool) (*Exfs, error) 
 
 	// initialize: make a root
 	if newFS {
-		blkID, ino, status := fs.createINode(0755|uint32(os.ModeDir), 0, 0)
+		blkID, ino, status := fs.createINode(0755|uint32(syscall.S_IFDIR), 0, 0)
 		if status != fuse.OK {
 			err := fmt.Errorf("Failed to make inode for FS root: status %d", status)
 			log.Error(err)
@@ -53,6 +53,8 @@ func NewExfs(blockManager BlockManager, root uint64, newFS bool) (*Exfs, error) 
 }
 
 func (fs *Exfs) createINode(mode uint32, uid uint32, gid uint32) (blkID uint64, ino *INode, status fuse.Status) {
+	log.Infof("createINode: %o, %d, %d", mode, uid, gid)
+
 	var err error
 	blkID, err = fs.blockManager.AllocBlock()
 	if err != nil {
@@ -116,6 +118,8 @@ func (fs *Exfs) logSetSizeError(newSize uint64, inodeBlkID uint64, err error) {
 }
 
 func (fs *Exfs) getINodeByBlkID(blkID uint64) (ino *INode, err error) {
+	log.Infof("getINodeByBlkID: %d", blkID)
+
 	blk, err := fs.blockManager.GetBlock(blkID)
 	if err != nil {
 		fs.logReadBlkError(blkID, 0, err)
@@ -130,6 +134,8 @@ func (fs *Exfs) getINodeByBlkID(blkID uint64) (ino *INode, err error) {
 }
 
 func readAll(file *ExfsFile) ([]byte, fuse.Status) {
+	log.Infof("readAll: File(%d)", file.inodeBlkID)
+
 	fileData := make([]byte, file.inode.Size)
 	readResult, readStatus := file.Read(fileData, 0)
 	if !readStatus.Ok() {
@@ -148,21 +154,30 @@ func readAll(file *ExfsFile) ([]byte, fuse.Status) {
 }
 
 func (fs *Exfs) getINode(name string, context *fuse.Context) (blkID uint64, ino *INode, status fuse.Status) {
+	log.Infof("getINode: %s", name)
+
 	// TODO: Optimize with directory buffer
 
 	var err error
 
 	currentBlkID := fs.root
-	dirs := strings.Split(gopath.Clean(name), string(os.PathSeparator))
+	cleaned := gopath.Clean(name)
+	var dirs []string
+	if cleaned == "." {
+		dirs = make([]string, 0)
+	} else {
+		dirs = strings.Split(cleaned, string(os.PathSeparator))
+	}
 	for _, v := range dirs {
 		// get current inode
 		inode, err := fs.getINodeByBlkID(currentBlkID)
 		if err != nil {
+			log.Errorf("Failed to get INode(%d) by ID: %s", currentBlkID, err.Error())
 			return 0, nil, fuse.EIO
 		}
 
 		// is it a directory?
-		if !os.FileMode(inode.Mode).IsDir() {
+		if inode.Mode&uint32(syscall.S_IFDIR) == 0 {
 			err := fmt.Errorf("File(%d) is not a directory", currentBlkID)
 			log.Error(err)
 			return 0, nil, fuse.ENOTDIR
@@ -200,14 +215,18 @@ func (fs *Exfs) getINode(name string, context *fuse.Context) (blkID uint64, ino 
 	blkID = currentBlkID
 	ino, err = fs.getINodeByBlkID(blkID)
 	if err != nil {
+		log.Errorf("Failed to get INode(%d) by ID: %s", blkID, err.Error())
 		return 0, nil, fuse.EIO
 	}
 
 	status = fuse.OK
+	log.Infof("getINode OK: %d, %v", blkID, ino)
 	return
 }
 
 func (fs *Exfs) GetAttr(name string, context *fuse.Context) (*fuse.Attr, fuse.Status) {
+	log.Infof("GetAttr: %s", name)
+
 	blkID, ino, status := fs.getINode(name, context)
 	if status != fuse.OK {
 		return nil, status
@@ -236,6 +255,8 @@ func (fs *Exfs) GetAttr(name string, context *fuse.Context) (*fuse.Attr, fuse.St
 }
 
 func (fs *Exfs) Chmod(name string, mode uint32, context *fuse.Context) (code fuse.Status) {
+	log.Infof("Chmod: %s, %o", name, mode)
+
 	blkID, ino, status := fs.getINode(name, context)
 	if status != fuse.OK {
 		return status
@@ -250,6 +271,8 @@ func (fs *Exfs) Chmod(name string, mode uint32, context *fuse.Context) (code fus
 }
 
 func (fs *Exfs) Chown(name string, uid uint32, gid uint32, context *fuse.Context) (code fuse.Status) {
+	log.Infof("Chown: %s, %d, %d", name, uid, gid)
+
 	blkID, ino, status := fs.getINode(name, context)
 	if status != fuse.OK {
 		return status
@@ -264,6 +287,8 @@ func (fs *Exfs) Chown(name string, uid uint32, gid uint32, context *fuse.Context
 }
 
 func (fs *Exfs) Utimens(name string, Atime *time.Time, Mtime *time.Time, context *fuse.Context) (code fuse.Status) {
+	log.Infof("Utimens: %s, %v, %v", name, Atime, Mtime)
+
 	blkID, ino, status := fs.getINode(name, context)
 	if status != fuse.OK {
 		return status
@@ -278,6 +303,8 @@ func (fs *Exfs) Utimens(name string, Atime *time.Time, Mtime *time.Time, context
 }
 
 func (fs *Exfs) Truncate(name string, size uint64, context *fuse.Context) (code fuse.Status) {
+	log.Infof("Truncate: %s, %d", name, size)
+
 	blkID, ino, status := fs.getINode(name, context)
 	if status != fuse.OK {
 		return status
@@ -292,6 +319,8 @@ func (fs *Exfs) Truncate(name string, size uint64, context *fuse.Context) (code 
 }
 
 func (fs *Exfs) Access(name string, mode uint32, context *fuse.Context) (code fuse.Status) {
+	log.Infof("Access: %s, %d", name, mode)
+
 	_, ino, status := fs.getINode(name, context)
 	if status != fuse.OK {
 		return status
@@ -300,16 +329,28 @@ func (fs *Exfs) Access(name string, mode uint32, context *fuse.Context) (code fu
 	// TODO: CHECK SYMLINK
 
 	// Permission checking
+	if mode == syscall.F_OK {
+		return fuse.OK
+	}
+
+	var perm uint32
 	if context.Uid == ino.Uid {
-		return fuse.Status((ino.Mode & 0700) >> 6)
+		perm = (ino.Mode & 0700) >> 6
 	} else if context.Gid == ino.Uid {
-		return fuse.Status((ino.Mode & 0070) >> 3)
+		perm = (ino.Mode & 0070) >> 3
 	} else {
-		return fuse.Status((ino.Mode & 0007) >> 0)
+		perm = (ino.Mode & 0007) >> 0
+	}
+	if mode&perm == mode {
+		return fuse.OK
+	} else {
+		return fuse.EACCES
 	}
 }
 
 func (fs *Exfs) Mkdir(name string, mode uint32, context *fuse.Context) fuse.Status {
+	log.Infof("Mkdir: %s, %d", name, mode)
+
 	dir, newName := gopath.Split(name)
 	blkID, ino, status := fs.getINode(dir, context)
 	if status != fuse.OK {
@@ -337,7 +378,7 @@ func (fs *Exfs) Mkdir(name string, mode uint32, context *fuse.Context) fuse.Stat
 		}
 	}
 
-	newBlkID, newInode, status := fs.createINode(mode|uint32(os.ModeDir), context.Owner.Uid, context.Owner.Gid)
+	newBlkID, newInode, status := fs.createINode(mode|uint32(syscall.S_IFDIR), context.Owner.Uid, context.Owner.Gid)
 	if status != fuse.OK {
 		return status
 	}
@@ -363,6 +404,8 @@ func (fs *Exfs) Mkdir(name string, mode uint32, context *fuse.Context) fuse.Stat
 }
 
 func (fs *Exfs) Rename(oldName string, newName string, context *fuse.Context) (code fuse.Status) {
+	log.Infof("Rename: %s, %s", oldName, newName)
+
 	oldDir, oldFname := gopath.Split(oldName)
 	blkID, ino, status := fs.getINode(oldDir, context)
 	if status != fuse.OK {
@@ -370,9 +413,18 @@ func (fs *Exfs) Rename(oldName string, newName string, context *fuse.Context) (c
 	}
 
 	newDir, newFname := gopath.Split(newName)
-	nBlkID, nIno, status := fs.getINode(newDir, context)
-	if status != fuse.OK {
-		return status
+	var (
+		nBlkID uint64
+		nIno   *INode
+	)
+	if newDir != oldDir {
+		nBlkID, nIno, status = fs.getINode(newDir, context)
+		if status != fuse.OK {
+			return status
+		}
+	} else {
+		nBlkID = blkID
+		nIno = ino
 	}
 
 	// TODO: CHECK PERMISSION
@@ -389,16 +441,26 @@ func (fs *Exfs) Rename(oldName string, newName string, context *fuse.Context) (c
 		return fuse.EIO
 	}
 
-	nFile := NewExfsFile(fs, nBlkID, nIno)
-	defer nFile.Close()
-	nFileData, status := readAll(nFile)
-	if status != fuse.OK {
-		return status
-	}
-	nDirEntries, err := UnmarshalDirectory(nFileData)
-	if err != nil {
-		log.Errorf("Failed to read directory(%d) contents: %s", nBlkID, err.Error())
-		return fuse.EIO
+	var (
+		nFile       *ExfsFile
+		nDirEntries *Directory
+	)
+	if blkID != nBlkID {
+		nFile = NewExfsFile(fs, nBlkID, nIno)
+		defer nFile.Close()
+		nFileData, status := readAll(nFile)
+		if status != fuse.OK {
+			return status
+		}
+		_nDirEntries, err := UnmarshalDirectory(nFileData)
+		if err != nil {
+			log.Errorf("Failed to read directory(%d) contents: %s", nBlkID, err.Error())
+			return fuse.EIO
+		}
+		nDirEntries = &_nDirEntries
+	} else {
+		nFile = file
+		nDirEntries = &dirEntries
 	}
 
 	var fileBlkID uint64
@@ -416,17 +478,19 @@ func (fs *Exfs) Rename(oldName string, newName string, context *fuse.Context) (c
 	}
 	oldpathIno, err := fs.getINodeByBlkID(fileBlkID)
 	if err != nil {
+		log.Errorf("Failed to get INode(%d) by ID: %s", fileBlkID, err.Error())
 		return fuse.EIO
 	}
 
-	for k, v := range nDirEntries {
+	for k, v := range *nDirEntries {
 		if v.Filename == newFname {
 			// unlink the new one
 			newpathIno, err := fs.getINodeByBlkID(v.INodeID)
 			if err != nil {
+				log.Errorf("Failed to get INode(%d) by ID: %s", v.INodeID, err.Error())
 				return fuse.EIO
 			}
-			if oldpathIno.Mode&uint32(os.ModeDir) == 0 && newpathIno.Mode&uint32(os.ModeDir) != 0 {
+			if oldpathIno.Mode&uint32(syscall.S_IFDIR) == 0 && newpathIno.Mode&uint32(syscall.S_IFDIR) != 0 {
 				return fuse.Status(syscall.EISDIR)
 			}
 
@@ -437,11 +501,11 @@ func (fs *Exfs) Rename(oldName string, newName string, context *fuse.Context) (c
 			}
 			fs.blockManager.RemoveBlock(v.INodeID)
 
-			nDirEntries = append(nDirEntries[:k], nDirEntries[k+1:]...)
+			*nDirEntries = append((*nDirEntries)[:k], (*nDirEntries)[k+1:]...)
 			break
 		}
 	}
-	nDirEntries = append(nDirEntries, DirectoryEntry{newFname, fileBlkID})
+	*nDirEntries = append((*nDirEntries), DirectoryEntry{newFname, fileBlkID})
 
 	newData := dirEntries.Marshal()
 	status = file.Truncate(uint64(len(newData)))
@@ -473,6 +537,8 @@ func (fs *Exfs) Rename(oldName string, newName string, context *fuse.Context) (c
 }
 
 func (fs *Exfs) Unlink(name string, context *fuse.Context) (code fuse.Status) {
+	log.Infof("Unlink: %s", name)
+
 	dir, fname := gopath.Split(name)
 	blkID, ino, status := fs.getINode(dir, context)
 	if status != fuse.OK {
@@ -499,6 +565,7 @@ func (fs *Exfs) Unlink(name string, context *fuse.Context) (code fuse.Status) {
 		if v.Filename == fname {
 			fIno, err := fs.getINodeByBlkID(v.INodeID)
 			if err != nil {
+				log.Errorf("Failed to get INode(%d) by ID: %s", v.INodeID, err.Error())
 				return fuse.EIO
 			}
 
@@ -531,6 +598,8 @@ func (fs *Exfs) Unlink(name string, context *fuse.Context) (code fuse.Status) {
 }
 
 func (fs *Exfs) Open(name string, flags uint32, context *fuse.Context) (file nodefs.File, code fuse.Status) {
+	log.Infof("Open: %s, %X", name, flags)
+
 	blkID, ino, status := fs.getINode(name, context)
 	if status == fuse.ENOENT && flags&uint32(os.O_CREATE) != 0 {
 		return fs.Create(name, flags, 0644, context)
@@ -552,6 +621,8 @@ func (fs *Exfs) Open(name string, flags uint32, context *fuse.Context) (file nod
 }
 
 func (fs *Exfs) Create(name string, flags uint32, mode uint32, context *fuse.Context) (file nodefs.File, code fuse.Status) {
+	log.Infof("Create: %s, %X, %o", name, flags, mode)
+
 	dir, newName := gopath.Split(name)
 	blkID, ino, status := fs.getINode(dir, context)
 	if status != fuse.OK {
@@ -583,6 +654,7 @@ func (fs *Exfs) Create(name string, flags uint32, mode uint32, context *fuse.Con
 			// unlink the old one
 			oldIno, err := fs.getINodeByBlkID(v.INodeID)
 			if err != nil {
+				log.Errorf("Failed to get INode(%d) by ID: %s", v.INodeID, err.Error())
 				return nil, fuse.EIO
 			}
 
@@ -615,11 +687,13 @@ func (fs *Exfs) Create(name string, flags uint32, mode uint32, context *fuse.Con
 }
 
 func (fs *Exfs) OpenDir(name string, context *fuse.Context) (stream []fuse.DirEntry, code fuse.Status) {
+	log.Infof("OpenDir: %s", name)
+
 	blkID, ino, status := fs.getINode(name, context)
 	if status != fuse.OK {
 		return nil, status
 	}
-	if ino.Mode&uint32(os.ModeDir) == 0 {
+	if ino.Mode&uint32(syscall.S_IFDIR) == 0 {
 		return nil, fuse.ENOTDIR
 	}
 
@@ -642,6 +716,7 @@ func (fs *Exfs) OpenDir(name string, context *fuse.Context) (stream []fuse.DirEn
 	for k, v := range dirEntries {
 		fIno, err := fs.getINodeByBlkID(v.INodeID)
 		if err != nil {
+			log.Errorf("Failed to get INode(%d) by ID: %s", v.INodeID, err.Error())
 			return stream[:k], fuse.EIO
 		}
 		stream[k] = fuse.DirEntry{
