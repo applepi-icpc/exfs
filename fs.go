@@ -46,6 +46,7 @@ func NewExfs(blockManager BlockManager, root uint64, newFS bool) (*Exfs, error) 
 			log.Error(err)
 			return nil, err
 		}
+		fs.root = blkID
 	}
 
 	return fs, nil
@@ -612,3 +613,46 @@ func (fs *Exfs) Create(name string, flags uint32, mode uint32, context *fuse.Con
 
 	return f, status
 }
+
+func (fs *Exfs) OpenDir(name string, context *fuse.Context) (stream []fuse.DirEntry, code fuse.Status) {
+	blkID, ino, status := fs.getINode(name, context)
+	if status != fuse.OK {
+		return nil, status
+	}
+	if ino.Mode&uint32(os.ModeDir) == 0 {
+		return nil, fuse.ENOTDIR
+	}
+
+	// TODO: CHECK PERMISSION
+
+	dirFile := NewExfsFile(fs, blkID, ino)
+	defer dirFile.Close()
+	fileData, status := readAll(dirFile)
+	if status != fuse.OK {
+		return nil, status
+	}
+
+	dirEntries, err := UnmarshalDirectory(fileData)
+	if err != nil {
+		log.Errorf("Failed to read directory(%d) contents: %s", blkID, err.Error())
+		return nil, fuse.EIO
+	}
+
+	stream = make([]fuse.DirEntry, len(dirEntries))
+	for k, v := range dirEntries {
+		fIno, err := fs.getINodeByBlkID(v.INodeID)
+		if err != nil {
+			return stream[:k], fuse.EIO
+		}
+		stream[k] = fuse.DirEntry{
+			Mode: fIno.Mode,
+			Name: v.Filename,
+		}
+	}
+
+	return stream, fuse.OK
+}
+
+// TODO: Stat
+// func (fs *Exfs) StatFs(name string) *fuse.StatfsOut {
+// }
