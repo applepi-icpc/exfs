@@ -536,6 +536,88 @@ func (fs *Exfs) Rename(oldName string, newName string, context *fuse.Context) (c
 	return fuse.OK
 }
 
+func (fs *Exfs) Rmdir(name string, context *fuse.Context) (code fuse.Status) {
+	log.Infof("Rmdir: %s", name)
+
+	dir, fname := gopath.Split(name)
+	blkID, ino, status := fs.getINode(dir, context)
+	if status != fuse.OK {
+		return status
+	}
+
+	// TODO: CHECK PERMISSION
+
+	file := NewExfsFile(fs, blkID, ino)
+	defer file.Close()
+	fileData, status := readAll(file)
+	if status != fuse.OK {
+		return status
+	}
+
+	dirEntries, err := UnmarshalDirectory(fileData)
+	if err != nil {
+		log.Errorf("Failed to read directory(%d) contents: %s", blkID, err.Error())
+		return fuse.EIO
+	}
+
+	found := false
+	for k, v := range dirEntries {
+		if v.Filename == fname {
+			fIno, err := fs.getINodeByBlkID(v.INodeID)
+			if err != nil {
+				log.Errorf("Failed to get INode(%d) by ID: %s", v.INodeID, err.Error())
+				return fuse.EIO
+			}
+
+			// TODO: HARDLINK
+
+			// check if dir
+			if fIno.Mode&uint32(syscall.S_IFDIR) == 0 {
+				return fuse.ENOTDIR
+			}
+			// check if empty
+			targetFile := NewExfsFile(fs, v.INodeID, fIno)
+			defer targetFile.Close()
+			targetData, status := readAll(targetFile)
+			if status != fuse.OK {
+				return status
+			}
+			targetEnt, err := UnmarshalDirectory(targetData)
+			if err != nil {
+				log.Errorf("Failed to read directory(%d) contents: %s", v.INodeID, err.Error())
+				return fuse.EIO
+			}
+			if len(targetEnt) > 0 {
+				log.Infof("ENOTEMPTY: %v", targetEnt)
+				return fuse.Status(syscall.ENOTEMPTY)
+			}
+
+			for _, toRemoveBlkID := range fIno.Blocks {
+				fs.blockManager.RemoveBlock(toRemoveBlkID)
+			}
+			fs.blockManager.RemoveBlock(v.INodeID)
+
+			dirEntries = append(dirEntries[:k], dirEntries[k+1:]...)
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fuse.ENOENT
+	}
+
+	newData := dirEntries.Marshal()
+	status = file.Truncate(uint64(len(newData)))
+	if status != fuse.OK {
+		return status
+	}
+	written, status := file.Write(newData, 0)
+	if status == fuse.OK && int(written) != len(newData) {
+		log.Warnf("Warning: Mkdir: Write OK but length mismatch: %d <=> %d", written, len(newData))
+	}
+	return status
+}
+
 func (fs *Exfs) Unlink(name string, context *fuse.Context) (code fuse.Status) {
 	log.Infof("Unlink: %s", name)
 
