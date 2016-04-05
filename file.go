@@ -6,6 +6,8 @@ import (
 	"syscall"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
+
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 )
@@ -41,6 +43,8 @@ func (f *ExfsFile) InnerFile() nodefs.File {
 }
 
 func (f *ExfsFile) Read(dest []byte, off int64) (fuse.ReadResult, fuse.Status) {
+	log.Infof("Read file(%d): off = %d, end = %d, size = %d", f.inodeBlkID, off, off+int64(len(dest)), f.inode.Size)
+
 	f.lock.RLock()
 	defer f.lock.RUnlock()
 
@@ -52,6 +56,9 @@ func (f *ExfsFile) Read(dest []byte, off int64) (fuse.ReadResult, fuse.Status) {
 	}
 
 	end := int64(off) + int64(len(dest))
+	if off >= int64(f.inode.Size) {
+		return fuse.ReadResultData(nil), fuse.OK
+	}
 	if end > int64(f.inode.Size) {
 		end = int64(f.inode.Size)
 	}
@@ -316,6 +323,8 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 }
 
 func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Status) {
+	log.Infof("Write file(%d): off = %d, end = %d, size = %d", f.inodeBlkID, off, off+int64(len(data)), f.inode.Size)
+
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
