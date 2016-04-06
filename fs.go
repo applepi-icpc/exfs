@@ -14,6 +14,36 @@ import (
 	"github.com/hanwen/go-fuse/fuse/pathfs"
 )
 
+type Perm uint32
+
+func getPerm(ino *INode, context *fuse.Context) (perm Perm) {
+	// root
+	if context.Uid == 0 {
+		return 0x7
+	}
+
+	if context.Uid == ino.Uid {
+		perm = Perm((ino.Mode & 0700) >> 6)
+	} else if context.Gid == ino.Uid {
+		perm = Perm((ino.Mode & 0070) >> 3)
+	} else {
+		perm = Perm((ino.Mode & 0007) >> 0)
+	}
+	return
+}
+
+func (p Perm) Readable() bool {
+	return (uint32(p) & 4) != 0
+}
+
+func (p Perm) Writable() bool {
+	return (uint32(p) & 2) != 0
+}
+
+func (p Perm) Executable() bool {
+	return (uint32(p) & 1) != 0
+}
+
 type Exfs struct {
 	pathfs.FileSystem
 
@@ -183,7 +213,10 @@ func (fs *Exfs) getINode(name string, context *fuse.Context) (blkID uint64, ino 
 			return 0, nil, fuse.ENOTDIR
 		}
 
-		// TODO: CHECK PERMISSION
+		// DONE: CHECK PERMISSION
+		if !getPerm(inode, context).Executable() {
+			return 0, nil, fuse.EACCES
+		}
 
 		// create file
 		file := NewExfsFile(fs, currentBlkID, inode)
@@ -232,8 +265,6 @@ func (fs *Exfs) GetAttr(name string, context *fuse.Context) (*fuse.Attr, fuse.St
 		return nil, status
 	}
 
-	// TODO: CHECK PERMISSION
-
 	res := &fuse.Attr{
 		Ino:   blkID,
 		Size:  ino.Size,
@@ -262,7 +293,11 @@ func (fs *Exfs) Chmod(name string, mode uint32, context *fuse.Context) (code fus
 		return status
 	}
 
-	// TODO: CHECK PERMISSION
+	// DONE: CHECK PERMISSION
+	if !getPerm(ino, context).Writable() {
+		return fuse.EACCES
+	}
+
 	// TODO: CHECK SYMLINK
 
 	file := NewExfsFile(fs, blkID, ino)
@@ -278,7 +313,11 @@ func (fs *Exfs) Chown(name string, uid uint32, gid uint32, context *fuse.Context
 		return status
 	}
 
-	// TODO: CHECK PERMISSION
+	// DOWN: CHECK PERMISSION
+	if !getPerm(ino, context).Writable() {
+		return fuse.EACCES
+	}
+
 	// TODO: CHECK SYMLINK
 
 	file := NewExfsFile(fs, blkID, ino)
@@ -294,7 +333,11 @@ func (fs *Exfs) Utimens(name string, Atime *time.Time, Mtime *time.Time, context
 		return status
 	}
 
-	// TODO: CHECK PERMISSION
+	// DONE: CHECK PERMISSION
+	if !getPerm(ino, context).Writable() {
+		return fuse.EACCES
+	}
+
 	// TODO: CHECK SYMLINK
 
 	file := NewExfsFile(fs, blkID, ino)
@@ -310,7 +353,11 @@ func (fs *Exfs) Truncate(name string, size uint64, context *fuse.Context) (code 
 		return status
 	}
 
-	// TODO: CHECK PERMISSION
+	// DONE: CHECK PERMISSION
+	if !getPerm(ino, context).Writable() {
+		return fuse.EACCES
+	}
+
 	// TODO: CHECK SYMLINK
 
 	file := NewExfsFile(fs, blkID, ino)
@@ -333,14 +380,7 @@ func (fs *Exfs) Access(name string, mode uint32, context *fuse.Context) (code fu
 		return fuse.OK
 	}
 
-	var perm uint32
-	if context.Uid == ino.Uid {
-		perm = (ino.Mode & 0700) >> 6
-	} else if context.Gid == ino.Uid {
-		perm = (ino.Mode & 0070) >> 3
-	} else {
-		perm = (ino.Mode & 0007) >> 0
-	}
+	perm := uint32(getPerm(ino, context))
 	if mode&perm == mode {
 		return fuse.OK
 	} else {
@@ -357,7 +397,10 @@ func (fs *Exfs) Mkdir(name string, mode uint32, context *fuse.Context) fuse.Stat
 		return status
 	}
 
-	// TODO: CHECK PERMISSION
+	// DONE: CHECK PERMISSION
+	if !getPerm(ino, context).Writable() {
+		return fuse.EACCES
+	}
 
 	file := NewExfsFile(fs, blkID, ino)
 	defer file.Close()
@@ -427,7 +470,13 @@ func (fs *Exfs) Rename(oldName string, newName string, context *fuse.Context) (c
 		nIno = ino
 	}
 
-	// TODO: CHECK PERMISSION
+	// DONE: CHECK PERMISSION
+	if !getPerm(ino, context).Writable() {
+		return fuse.EACCES
+	}
+	if !getPerm(nIno, context).Writable() {
+		return fuse.EACCES
+	}
 
 	file := NewExfsFile(fs, blkID, ino)
 	defer file.Close()
@@ -545,7 +594,10 @@ func (fs *Exfs) Rmdir(name string, context *fuse.Context) (code fuse.Status) {
 		return status
 	}
 
-	// TODO: CHECK PERMISSION
+	// DONE: CHECK PERMISSION
+	if !getPerm(ino, context).Writable() {
+		return fuse.EACCES
+	}
 
 	file := NewExfsFile(fs, blkID, ino)
 	defer file.Close()
@@ -627,7 +679,10 @@ func (fs *Exfs) Unlink(name string, context *fuse.Context) (code fuse.Status) {
 		return status
 	}
 
-	// TODO: CHECK PERMISSION
+	// DONE: CHECK PERMISSION
+	if !getPerm(ino, context).Writable() {
+		return fuse.EACCES
+	}
 
 	file := NewExfsFile(fs, blkID, ino)
 	defer file.Close()
@@ -689,7 +744,17 @@ func (fs *Exfs) Open(name string, flags uint32, context *fuse.Context) (file nod
 		return nil, status
 	}
 
-	// TODO: CHECK PERMISSION
+	// DONE: CHECK PERMISSION
+	if flags&fuse.O_ANYWRITE != 0 {
+		if !getPerm(ino, context).Writable() {
+			return nil, fuse.EACCES
+		}
+	} else {
+		if !getPerm(ino, context).Readable() {
+			return nil, fuse.EACCES
+		}
+	}
+
 	// TODO: CHECK SYMLINK
 
 	f := NewExfsFile(fs, blkID, ino)
@@ -711,7 +776,10 @@ func (fs *Exfs) Create(name string, flags uint32, mode uint32, context *fuse.Con
 		return nil, status
 	}
 
-	// TODO: CHECK PERMISSION
+	// DONE: CHECK PERMISSION
+	if !getPerm(ino, context).Writable() {
+		return nil, fuse.EACCES
+	}
 
 	dirFile := NewExfsFile(fs, blkID, ino)
 	defer dirFile.Close()
@@ -779,7 +847,10 @@ func (fs *Exfs) OpenDir(name string, context *fuse.Context) (stream []fuse.DirEn
 		return nil, fuse.ENOTDIR
 	}
 
-	// TODO: CHECK PERMISSION
+	// DONE: CHECK PERMISSION
+	if !getPerm(ino, context).Readable() {
+		return nil, fuse.EACCES
+	}
 
 	dirFile := NewExfsFile(fs, blkID, ino)
 	defer dirFile.Close()

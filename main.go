@@ -2,17 +2,22 @@ package main
 
 import (
 	"flag"
-	"log"
 
+	log "github.com/Sirupsen/logrus"
+	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 	"github.com/hanwen/go-fuse/fuse/pathfs"
 )
 
+var (
+	flagMountPoint = flag.String("p", "./fs", "Mount point")
+	flagAllowOther = flag.Bool("allow_other", false, "Allow other users to access")
+)
+
 func main() {
 	flag.Parse()
-	if len(flag.Args()) < 1 {
-		log.Fatal("Usage:\n  hello MOUNTPOINT")
-	}
+	mountPoint := *flagMountPoint
+
 	// fs, err := NewExfs(NewMemBlockManager(), 0, true)
 	fs, err := NewExfs(NewMemLimitedBlockManager(), 0, true)
 	fs.SetDebug(true)
@@ -20,9 +25,15 @@ func main() {
 		log.Fatalf("Create FS failed: %v\n", err)
 	}
 	nfs := pathfs.NewPathNodeFs(fs, nil)
-	server, _, err := nodefs.MountRoot(flag.Arg(0), nfs.Root(), nil)
+
+	root := nfs.Root()
+	conn := nodefs.NewFileSystemConnector(root, nil)
+	server, err := fuse.NewServer(conn.RawFS(), mountPoint, &fuse.MountOptions{
+		AllowOther: *flagAllowOther,
+	})
 	if err != nil {
 		log.Fatalf("Mount fail: %v\n", err)
 	}
+
 	server.Serve()
 }
