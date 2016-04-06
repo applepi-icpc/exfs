@@ -5,8 +5,9 @@ import (
 )
 
 var (
-	ErrNoBlock      = fmt.Errorf("no such block")
-	ErrNoMoreBlocks = fmt.Errorf("no more blocks")
+	ErrNoBlock       = fmt.Errorf("no such block")
+	ErrNoMoreBlocks  = fmt.Errorf("no more blocks")
+	ErrWriteTooLarge = fmt.Errorf("write too large")
 )
 
 const (
@@ -19,4 +20,7 @@ type BlockManager interface {
 	RemoveBlock(id uint64) error
 	AllocBlock() (uint64, error)
 	Blocksize() uint64
+
+	// free: free blocks; avail: free blocks available to unprivileged user
+	Blockstat() (used uint64, free uint64, avail uint64)
 }

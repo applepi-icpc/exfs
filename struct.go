@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	log "github.com/Sirupsen/logrus"
 )
 
 type DirectoryEntry struct {
@@ -50,6 +52,7 @@ func UnmarshalDirectory(data []byte) (Directory, error) {
 	d := make(Directory, 0)
 	err := json.Unmarshal(data, &d)
 	if err != nil {
+		log.Warnf("Failed unmarshalling: %s", string(data))
 		return nil, err
 	}
 	return d, nil

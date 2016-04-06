@@ -1,23 +1,25 @@
 package main
 
-import (
-	"sync/atomic"
+import "sync/atomic"
+
+const (
+	MLBMSizeLimit uint64 = 4096
 )
 
-// A simple block manager
-type MemBlockManager struct {
+// A simple block manager with size limit
+type MemLimitedBlockManager struct {
 	storage   map[uint64][]byte
 	currentID uint64
 }
 
-func NewMemBlockManager() *MemBlockManager {
-	return &MemBlockManager{
+func NewMemLimitedBlockManager() *MemLimitedBlockManager {
+	return &MemLimitedBlockManager{
 		storage:   make(map[uint64][]byte),
 		currentID: 0,
 	}
 }
 
-func (m *MemBlockManager) GetBlock(id uint64) ([]byte, error) {
+func (m *MemLimitedBlockManager) GetBlock(id uint64) ([]byte, error) {
 	res, ok := m.storage[id]
 	if !ok || res == nil {
 		return nil, ErrNoBlock
@@ -27,10 +29,13 @@ func (m *MemBlockManager) GetBlock(id uint64) ([]byte, error) {
 	return resReplica, nil
 }
 
-func (m *MemBlockManager) SetBlock(id uint64, blk []byte) error {
+func (m *MemLimitedBlockManager) SetBlock(id uint64, blk []byte) error {
 	res, ok := m.storage[id]
 	if !ok || res == nil {
 		return ErrNoBlock
+	}
+	if uint64(len(blk)) > MLBMSizeLimit {
+		return ErrWriteTooLarge
 	}
 	blkReplica := make([]byte, len(blk))
 	copy(blkReplica, blk)
@@ -38,7 +43,7 @@ func (m *MemBlockManager) SetBlock(id uint64, blk []byte) error {
 	return nil
 }
 
-func (m *MemBlockManager) RemoveBlock(id uint64) error {
+func (m *MemLimitedBlockManager) RemoveBlock(id uint64) error {
 	res, ok := m.storage[id]
 	if !ok || res == nil {
 		return ErrNoBlock
@@ -47,17 +52,17 @@ func (m *MemBlockManager) RemoveBlock(id uint64) error {
 	return nil
 }
 
-func (m *MemBlockManager) AllocBlock() (uint64, error) {
+func (m *MemLimitedBlockManager) AllocBlock() (uint64, error) {
 	res := atomic.AddUint64(&m.currentID, 1)
 	m.storage[res] = make([]byte, 0)
 	return res, nil
 }
 
-func (m *MemBlockManager) Blocksize() uint64 {
-	return SizeUnlimited
+func (m *MemLimitedBlockManager) Blocksize() uint64 {
+	return MLBMSizeLimit
 }
 
-func (m *MemBlockManager) Blockstat() (used uint64, free uint64, avail uint64) {
+func (m *MemLimitedBlockManager) Blockstat() (used uint64, free uint64, avail uint64) {
 	used = uint64(len(m.storage))
 
 	// dummy.

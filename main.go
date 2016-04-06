@@ -13,7 +13,9 @@ func main() {
 	if len(flag.Args()) < 1 {
 		log.Fatal("Usage:\n  hello MOUNTPOINT")
 	}
-	fs, err := NewExfs(NewMemBlockManager(), 0, true)
+	// fs, err := NewExfs(NewMemBlockManager(), 0, true)
+	fs, err := NewExfs(NewMemLimitedBlockManager(), 0, true)
+	fs.SetDebug(true)
 	if err != nil {
 		log.Fatalf("Create FS failed: %v\n", err)
 	}

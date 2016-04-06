@@ -6,8 +6,6 @@ import (
 	"syscall"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
-
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 )
@@ -42,8 +40,17 @@ func (f *ExfsFile) InnerFile() nodefs.File {
 	return nil
 }
 
+func sprintHeadTail(arr []byte) string {
+	if len(arr) <= 6 {
+		return fmt.Sprintf("%v", arr)
+	} else {
+		l := len(arr)
+		return fmt.Sprintf("[%X %X %X ... %X %X %X]", arr[0], arr[1], arr[2], arr[l-3], arr[l-2], arr[l-1])
+	}
+}
+
 func (f *ExfsFile) Read(dest []byte, off int64) (fuse.ReadResult, fuse.Status) {
-	log.Infof("Read file(%d): off = %d, end = %d, size = %d", f.inodeBlkID, off, off+int64(len(dest)), f.inode.Size)
+	// log.Infof("Read file(%d): off = %d, end = %d, size = %d", f.inodeBlkID, off, off+int64(len(dest)), f.inode.Size)
 
 	f.lock.RLock()
 	defer f.lock.RUnlock()
@@ -110,6 +117,7 @@ func (f *ExfsFile) Read(dest []byte, off int64) (fuse.ReadResult, fuse.Status) {
 				blkOff = firstBlk * blkSize
 				leng = blkSize - (off - blkOff) // off-blkOff : blkSize
 				copy(res[ptr:ptr+leng], blk[off-blkOff:])
+				// log.Infof("Read data[%d:%d] from block(%d)[%d:%d] (%d-th): %s", ptr, ptr+leng, f.inode.Blocks[firstBlk], off-blkOff, len(blk), firstBlk, sprintHeadTail(blk[off-blkOff:]))
 				ptr += leng
 
 				for i := firstBlk + 1; i <= lastBlk-1; i++ {
@@ -119,6 +127,7 @@ func (f *ExfsFile) Read(dest []byte, off int64) (fuse.ReadResult, fuse.Status) {
 						return fuse.ReadResultData(nil), fuse.EIO
 					}
 					copy(res[ptr:ptr+blkSize], blk)
+					// log.Infof("Read data[%d:%d] from block(%d)[%d:%d] (%d-th): %s", ptr, ptr+blkSize, f.inode.Blocks[i], 0, len(blk), i, sprintHeadTail(blk))
 					ptr += blkSize
 				}
 
@@ -130,6 +139,7 @@ func (f *ExfsFile) Read(dest []byte, off int64) (fuse.ReadResult, fuse.Status) {
 				blkOff = lastBlk * blkSize
 				leng = end - blkOff // 0 : end-blkOff
 				copy(res[ptr:], blk[:leng])
+				// log.Infof("Read data[%d:%d] from block(%d)[%d:%d] (%d-th): %s", ptr, len(res), f.inode.Blocks[lastBlk], 0, leng, lastBlk, sprintHeadTail(blk[:leng]))
 
 				return fuse.ReadResultData(res), fuse.OK
 			}
@@ -144,6 +154,8 @@ func (f *ExfsFile) saveINode() (err error) {
 }
 
 func (f *ExfsFile) setSize(newSize uint64) error {
+	// log.Warnf("setSize file(%d): %d", f.inodeBlkID, newSize)
+
 	// If any operation failed, f.inode would remain unchanged.
 	// For f.fs.blockManager, it should support log to remain consistent.
 
@@ -229,7 +241,10 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 			blkNeeds := (newSize + blkSize - 1) / blkSize
 
 			if newSize > oriSize { // alloc new blocks
-				lastBlk := f.inode.Blocks[blkOri-1]
+				var lastBlk uint64
+				if blkOri > 0 {
+					lastBlk = f.inode.Blocks[blkOri-1]
+				}
 
 				if blkNeeds == blkOri { // adjust the last block
 					f.inode.Size = newSize
@@ -263,14 +278,23 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 					}
 
 					// set original last block
-					blk, err := f.fs.blockManager.GetBlock(lastBlk)
-					if err != nil {
-						return err
-					}
-					blk = append(blk, make([]byte, blkSize-uint64(len(blk)))...)
-					err = f.fs.blockManager.SetBlock(lastBlk, blk)
-					if err != nil {
-						return err
+					var (
+						blk []byte
+						err error
+					)
+
+					if blkOri > 0 {
+						blk, err = f.fs.blockManager.GetBlock(lastBlk)
+						if err != nil {
+							return err
+						}
+						if uint64(len(blk)) < blkSize {
+							blk = append(blk, make([]byte, blkSize-uint64(len(blk)))...)
+							err = f.fs.blockManager.SetBlock(lastBlk, blk)
+							if err != nil {
+								return err
+							}
+						}
 					}
 
 					// set new full blocks
@@ -296,15 +320,22 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 					}
 				}
 			} else if newSize < oriSize { // truncate
+				f.inode.Blocks = f.inode.Blocks[:blkNeeds]
+				f.inode.Size = newSize
+				err = f.saveINode()
+				if err != nil {
+					return err
+				}
+
 				for i := blkNeeds; i < blkOri; i++ {
-					blkID := f.inode.Blocks[i]
+					blkID := oriBlocks[i]
 					err = f.fs.blockManager.RemoveBlock(blkID)
 					if err != nil {
 						return err
 					}
 				}
 
-				lastBlk := f.inode.Blocks[blkNeeds-1]
+				lastBlk := oriBlocks[blkNeeds-1]
 				blk, err := f.fs.blockManager.GetBlock(lastBlk)
 				if err != nil {
 					return err
@@ -323,7 +354,7 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 }
 
 func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Status) {
-	log.Infof("Write file(%d): off = %d, end = %d, size = %d", f.inodeBlkID, off, off+int64(len(data)), f.inode.Size)
+	// log.Infof("Write file(%d): off = %d, end = %d, size = %d", f.inodeBlkID, off, off+int64(len(data)), f.inode.Size)
 
 	f.lock.Lock()
 	defer f.lock.Unlock()
@@ -417,6 +448,7 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 				leng = uint32(blkSize - (off - blkOff))
 				copy(blk[off-blkOff:], data[written:written+leng])
 				err = f.fs.blockManager.SetBlock(f.inode.Blocks[firstBlk], blk)
+				// log.Infof("Write data[%d:%d] to block(%d)[%d:%d] (%d-th): %s", written, written+leng, f.inode.Blocks[firstBlk], off-blkOff, len(blk), firstBlk, sprintHeadTail(data[written:written+leng]))
 				if err != nil {
 					f.fs.logWriteBlkError(f.inode.Blocks[firstBlk], f.inodeBlkID, err)
 					return 0, fuse.EIO
@@ -425,6 +457,7 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 
 				for i := firstBlk + 1; i <= lastBlk-1; i++ {
 					err := f.fs.blockManager.SetBlock(f.inode.Blocks[i], data[written:written+uint32(blkSize)])
+					// log.Infof("Write data[%d:%d] to block(%d)[%d:%d] (%d-th): %s", written, written+uint32(blkSize), f.inode.Blocks[i], 0, blkSize, i, sprintHeadTail(data[written:written+uint32(blkSize)]))
 					if err != nil {
 						f.fs.logWriteBlkError(f.inode.Blocks[i], f.inodeBlkID, err)
 						return written, fuse.EIO
@@ -441,6 +474,7 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 				leng = uint32(end - blkOff) // 0 : end-blkOff
 				copy(blk[:leng], data[written:])
 				err = f.fs.blockManager.SetBlock(f.inode.Blocks[lastBlk], blk)
+				// log.Infof("Write data[%d:%d] to block(%d)[%d:%d] (%d-th): %s", written, len(data), f.inode.Blocks[lastBlk], 0, leng, lastBlk, sprintHeadTail(data[written:]))
 				if err != nil {
 					f.fs.logWriteBlkError(f.inode.Blocks[lastBlk], f.inodeBlkID, err)
 					return written, fuse.EIO

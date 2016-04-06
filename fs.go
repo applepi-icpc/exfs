@@ -53,7 +53,7 @@ func NewExfs(blockManager BlockManager, root uint64, newFS bool) (*Exfs, error) 
 }
 
 func (fs *Exfs) createINode(mode uint32, uid uint32, gid uint32) (blkID uint64, ino *INode, status fuse.Status) {
-	log.Infof("createINode: %o, %d, %d", mode, uid, gid)
+	// log.Infof("createINode: %o, %d, %d", mode, uid, gid)
 
 	var err error
 	blkID, err = fs.blockManager.AllocBlock()
@@ -118,7 +118,7 @@ func (fs *Exfs) logSetSizeError(newSize uint64, inodeBlkID uint64, err error) {
 }
 
 func (fs *Exfs) getINodeByBlkID(blkID uint64) (ino *INode, err error) {
-	log.Infof("getINodeByBlkID: %d", blkID)
+	// log.Infof("getINodeByBlkID: %d", blkID)
 
 	blk, err := fs.blockManager.GetBlock(blkID)
 	if err != nil {
@@ -134,7 +134,7 @@ func (fs *Exfs) getINodeByBlkID(blkID uint64) (ino *INode, err error) {
 }
 
 func readAll(file *ExfsFile) ([]byte, fuse.Status) {
-	log.Infof("readAll: File(%d)", file.inodeBlkID)
+	// log.Infof("readAll: File(%d)", file.inodeBlkID)
 
 	fileData := make([]byte, file.inode.Size)
 	readResult, readStatus := file.Read(fileData, 0)
@@ -154,7 +154,7 @@ func readAll(file *ExfsFile) ([]byte, fuse.Status) {
 }
 
 func (fs *Exfs) getINode(name string, context *fuse.Context) (blkID uint64, ino *INode, status fuse.Status) {
-	log.Infof("getINode: %s", name)
+	// log.Infof("getINode: %s", name)
 
 	// TODO: Optimize with directory buffer
 
@@ -220,7 +220,7 @@ func (fs *Exfs) getINode(name string, context *fuse.Context) (blkID uint64, ino 
 	}
 
 	status = fuse.OK
-	log.Infof("getINode OK: %d, %v", blkID, ino)
+	// log.Infof("getINode OK: %d, %v", blkID, ino)
 	return
 }
 
