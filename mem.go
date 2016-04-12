@@ -57,11 +57,12 @@ func (m *MemBlockManager) Blocksize() uint64 {
 	return SizeUnlimited
 }
 
-func (m *MemBlockManager) Blockstat() (used uint64, free uint64, avail uint64) {
+func (m *MemBlockManager) Blockstat() (total uint64, used uint64, free uint64, avail uint64) {
 	used = uint64(len(m.storage))
 
 	// dummy.
-	free = 2147483647
+	total = 2147483647
+	free = total - used
 	avail = free
 
 	return

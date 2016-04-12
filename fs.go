@@ -50,6 +50,8 @@ type Exfs struct {
 	blockManager BlockManager
 	root         uint64
 	debug        bool
+
+	files uint64
 }
 
 func NewExfs(blockManager BlockManager, root uint64, newFS bool) (*Exfs, error) {
@@ -58,6 +60,7 @@ func NewExfs(blockManager BlockManager, root uint64, newFS bool) (*Exfs, error) 
 		blockManager: blockManager,
 		root:         root,
 		debug:        false,
+		files:        0,
 	}
 
 	// initialize: make a root
@@ -117,6 +120,8 @@ func (fs *Exfs) createINode(mode uint32, uid uint32, gid uint32) (blkID uint64, 
 	} else {
 		// fs.blockManager.commit()
 	}
+
+	fs.files += 1
 
 	return
 }
@@ -282,6 +287,7 @@ func (fs *Exfs) GetAttr(name string, context *fuse.Context) (*fuse.Attr, fuse.St
 		res.Blocks = uint64(len(ino.Blocks))
 		res.Blksize = uint32(fs.blockManager.Blocksize())
 	}
+	log.Infof("  Attr: %v", res)
 	return res, fuse.OK
 }
 
@@ -549,6 +555,7 @@ func (fs *Exfs) Rename(oldName string, newName string, context *fuse.Context) (c
 				fs.blockManager.RemoveBlock(toRemoveBlkID)
 			}
 			fs.blockManager.RemoveBlock(v.INodeID)
+			fs.files -= 1
 
 			*nDirEntries = append((*nDirEntries)[:k], (*nDirEntries)[k+1:]...)
 			break
@@ -648,6 +655,7 @@ func (fs *Exfs) Rmdir(name string, context *fuse.Context) (code fuse.Status) {
 				fs.blockManager.RemoveBlock(toRemoveBlkID)
 			}
 			fs.blockManager.RemoveBlock(v.INodeID)
+			fs.files -= 1
 
 			dirEntries = append(dirEntries[:k], dirEntries[k+1:]...)
 			found = true
@@ -712,6 +720,7 @@ func (fs *Exfs) Unlink(name string, context *fuse.Context) (code fuse.Status) {
 				fs.blockManager.RemoveBlock(toRemoveBlkID)
 			}
 			fs.blockManager.RemoveBlock(v.INodeID)
+			fs.files -= 1
 
 			dirEntries = append(dirEntries[:k], dirEntries[k+1:]...)
 			found = true
@@ -814,6 +823,7 @@ func (fs *Exfs) Create(name string, flags uint32, mode uint32, context *fuse.Con
 				fs.blockManager.RemoveBlock(toRemoveBlkID)
 			}
 			fs.blockManager.RemoveBlock(v.INodeID)
+			fs.files -= 1
 
 			dirEntries = append(dirEntries[:k], dirEntries[k+1:]...)
 			break
@@ -881,6 +891,18 @@ func (fs *Exfs) OpenDir(name string, context *fuse.Context) (stream []fuse.DirEn
 	return stream, fuse.OK
 }
 
-// TODO: Stat
-// func (fs *Exfs) StatFs(name string) *fuse.StatfsOut {
-// }
+func (fs *Exfs) StatFs(name string) *fuse.StatfsOut {
+	btotal, _, bfree, bavail := fs.blockManager.Blockstat()
+	res := &fuse.StatfsOut{
+		Blocks:  btotal,
+		Bfree:   bfree,
+		Bavail:  bavail,
+		Files:   fs.files,
+		Ffree:   bfree,
+		NameLen: 1024, // TODO: Apply this restrict
+	}
+	if fs.blockManager.Blocksize() != SizeUnlimited && fs.blockManager.Blocksize() <= 0xFFFFFFFF {
+		res.Bsize = uint32(fs.blockManager.Blocksize())
+	}
+	return res
+}

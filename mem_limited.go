@@ -1,10 +1,18 @@
 package main
 
-import "sync/atomic"
+import (
+	"fmt"
+
+	"sync/atomic"
+)
 
 const (
-	MLBMSizeLimit uint64 = 4096
+	MLBMSizeLimit uint64 = 1048576
 )
+
+func init() {
+	fmt.Printf("EXFS: Running on limited mem block manager: %d bytes\n", MLBMSizeLimit)
+}
 
 // A simple block manager with size limit
 type MemLimitedBlockManager struct {
@@ -62,11 +70,12 @@ func (m *MemLimitedBlockManager) Blocksize() uint64 {
 	return MLBMSizeLimit
 }
 
-func (m *MemLimitedBlockManager) Blockstat() (used uint64, free uint64, avail uint64) {
+func (m *MemLimitedBlockManager) Blockstat() (total uint64, used uint64, free uint64, avail uint64) {
 	used = uint64(len(m.storage))
 
 	// dummy.
-	free = 2147483647
+	total = 2147483647
+	free = total - used
 	avail = free
 
 	return

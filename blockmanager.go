@@ -22,5 +22,5 @@ type BlockManager interface {
 	Blocksize() uint64
 
 	// free: free blocks; avail: free blocks available to unprivileged user
-	Blockstat() (used uint64, free uint64, avail uint64)
+	Blockstat() (total uint64, used uint64, free uint64, avail uint64)
 }
