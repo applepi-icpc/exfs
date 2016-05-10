@@ -54,7 +54,7 @@ type Exfs struct {
 	files uint64
 }
 
-func NewExfs(blockManager BlockManager, root uint64, newFS bool) (*Exfs, error) {
+func NewExfs(blockManager BlockManager, uid uint32, gid uint32, root uint64, newFS bool) (*Exfs, error) {
 	fs := &Exfs{
 		FileSystem:   pathfs.NewDefaultFileSystem(),
 		blockManager: blockManager,
@@ -65,7 +65,7 @@ func NewExfs(blockManager BlockManager, root uint64, newFS bool) (*Exfs, error) 
 
 	// initialize: make a root
 	if newFS {
-		blkID, ino, status := fs.createINode(0755|uint32(syscall.S_IFDIR), 0, 0)
+		blkID, ino, status := fs.createINode(0755|uint32(syscall.S_IFDIR), uid, gid)
 		if status != fuse.OK {
 			err := fmt.Errorf("Failed to make inode for FS root: status %d", status)
 			log.Error(err)

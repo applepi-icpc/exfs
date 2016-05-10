@@ -2,6 +2,8 @@ package main
 
 import (
 	"flag"
+	"os/user"
+	"strconv"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/hanwen/go-fuse/fuse"
@@ -18,8 +20,21 @@ func main() {
 	flag.Parse()
 	mountPoint := *flagMountPoint
 
+	u, err := user.Current()
+	if err != nil {
+		panic(err)
+	}
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		panic(err)
+	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		panic(err)
+	}
+
 	// fs, err := NewExfs(NewMemBlockManager(), 0, true)
-	fs, err := NewExfs(NewMemLimitedBlockManager(), 0, true)
+	fs, err := NewExfs(NewMemLimitedBlockManager(), uint32(uid), uint32(gid), 0, true)
 	fs.SetDebug(true)
 	if err != nil {
 		log.Fatalf("Create FS failed: %v\n", err)
