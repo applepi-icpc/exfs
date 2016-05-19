@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-
 	"sync/atomic"
+
+	"github.com/applepi-icpc/exfs/blockmanager"
 )
 
 const (
@@ -30,7 +31,7 @@ func NewMemLimitedBlockManager() *MemLimitedBlockManager {
 func (m *MemLimitedBlockManager) GetBlock(id uint64) ([]byte, error) {
 	res, ok := m.storage[id]
 	if !ok || res == nil {
-		return nil, ErrNoBlock
+		return nil, blockmanager.ErrNoBlock
 	}
 	resReplica := make([]byte, len(res))
 	copy(resReplica, res)
@@ -40,10 +41,10 @@ func (m *MemLimitedBlockManager) GetBlock(id uint64) ([]byte, error) {
 func (m *MemLimitedBlockManager) SetBlock(id uint64, blk []byte) error {
 	res, ok := m.storage[id]
 	if !ok || res == nil {
-		return ErrNoBlock
+		return blockmanager.ErrNoBlock
 	}
 	if uint64(len(blk)) > MLBMSizeLimit {
-		return ErrWriteTooLarge
+		return blockmanager.ErrWriteTooLarge
 	}
 	blkReplica := make([]byte, len(blk))
 	copy(blkReplica, blk)
@@ -54,7 +55,7 @@ func (m *MemLimitedBlockManager) SetBlock(id uint64, blk []byte) error {
 func (m *MemLimitedBlockManager) RemoveBlock(id uint64) error {
 	res, ok := m.storage[id]
 	if !ok || res == nil {
-		return ErrNoBlock
+		return blockmanager.ErrNoBlock
 	}
 	m.storage[id] = nil
 	return nil

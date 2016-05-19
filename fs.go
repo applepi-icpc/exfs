@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/applepi-icpc/exfs/blockmanager"
+
 	log "github.com/Sirupsen/logrus"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
@@ -47,14 +49,14 @@ func (p Perm) Executable() bool {
 type Exfs struct {
 	pathfs.FileSystem
 
-	blockManager BlockManager
+	blockManager blockmanager.BlockManager
 	root         uint64
 	debug        bool
 
 	files uint64
 }
 
-func NewExfs(blockManager BlockManager, uid uint32, gid uint32, root uint64, newFS bool) (*Exfs, error) {
+func NewExfs(blockManager blockmanager.BlockManager, uid uint32, gid uint32, root uint64, newFS bool) (*Exfs, error) {
 	fs := &Exfs{
 		FileSystem:   pathfs.NewDefaultFileSystem(),
 		blockManager: blockManager,
@@ -92,7 +94,7 @@ func (fs *Exfs) createINode(mode uint32, uid uint32, gid uint32) (blkID uint64, 
 	blkID, err = fs.blockManager.AllocBlock()
 	if err != nil {
 		log.Errorf("Failed to alloc new block for inode: %s", err.Error())
-		if err == ErrNoMoreBlocks {
+		if err == blockmanager.ErrNoMoreBlocks {
 			status = fuse.Status(syscall.ENOSPC)
 		} else {
 			status = fuse.EIO
@@ -283,7 +285,7 @@ func (fs *Exfs) GetAttr(name string, context *fuse.Context) (*fuse.Attr, fuse.St
 			Gid: ino.Gid,
 		},
 	}
-	if fs.blockManager.Blocksize() != SizeUnlimited {
+	if fs.blockManager.Blocksize() != blockmanager.SizeUnlimited {
 		res.Blocks = uint64(len(ino.Blocks))
 		res.Blksize = uint32(fs.blockManager.Blocksize())
 	}
@@ -901,7 +903,7 @@ func (fs *Exfs) StatFs(name string) *fuse.StatfsOut {
 		Ffree:   bfree,
 		NameLen: 1024, // TODO: Apply this restrict
 	}
-	if fs.blockManager.Blocksize() != SizeUnlimited && fs.blockManager.Blocksize() <= 0xFFFFFFFF {
+	if fs.blockManager.Blocksize() != blockmanager.SizeUnlimited && fs.blockManager.Blocksize() <= 0xFFFFFFFF {
 		res.Bsize = uint32(fs.blockManager.Blocksize())
 	}
 	return res

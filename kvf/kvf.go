@@ -1,6 +1,6 @@
-package exfs
+package kvf
 
-// #cgo pkg-config: zzkvf
+// #cgo pkg-config: kvf
 /*
 #include <stdlib.h>
 #include <stdint.h>
@@ -10,10 +10,12 @@ import "C"
 import (
 	"reflect"
 	"unsafe"
+
+	"github.com/applepi-icpc/exfs/blockmanager"
 )
 
 const (
-	KVFSizeLimit = 524288
+	KVFSizeLimit = 262144
 )
 
 type KVFBlockManager struct {
@@ -28,14 +30,18 @@ func NewKVFBlockManager(name string) *KVFBlockManager {
 	return ret
 }
 
+func (kvfm *KVFBlockManager) Destroy() {
+	C.DestroyKVFBlockManager(&kvfm.h)
+}
+
 func (kvfm *KVFBlockManager) GetBlock(id uint64) ([]byte, error) {
 	var (
 		cBlk    unsafe.Pointer
 		cBlkLen C.uint64_t
 	)
-	errcode := C.GetBlock(&kvfm.h, C.uint64_t(id), (**C.char)(&cBlk), &cBlkLen)
+	errcode := C.GetBlock(&kvfm.h, C.uint64_t(id), (**C.char)((unsafe.Pointer)(&cBlk)), &cBlkLen)
 	if int(errcode) != 0 {
-		return nil, ErrNoBlock
+		return nil, blockmanager.ErrNoBlock
 	}
 	blkLen := int(cBlkLen)
 	blk := make([]byte, blkLen)
@@ -50,7 +56,7 @@ func (kvfm *KVFBlockManager) GetBlock(id uint64) ([]byte, error) {
 
 func (kvfm *KVFBlockManager) SetBlock(id uint64, blk []byte) error {
 	if len(blk) > KVFSizeLimit {
-		return ErrWriteTooLarge
+		return blockmanager.ErrWriteTooLarge
 	}
 	var (
 		cBlk    = (*C.char)(unsafe.Pointer(&blk[0]))
@@ -58,7 +64,7 @@ func (kvfm *KVFBlockManager) SetBlock(id uint64, blk []byte) error {
 	)
 	errcode := C.SetBlock(&kvfm.h, C.uint64_t(id), cBlk, cBlkLen)
 	if int(errcode) != 0 {
-		return ErrNoBlock
+		return blockmanager.ErrNoBlock
 	}
 	return nil
 }
@@ -66,7 +72,7 @@ func (kvfm *KVFBlockManager) SetBlock(id uint64, blk []byte) error {
 func (kvfm *KVFBlockManager) RemoveBlock(id uint64) error {
 	errcode := C.RemoveBlock(&kvfm.h, C.uint64_t(id))
 	if int(errcode) != 0 {
-		return ErrNoBlock
+		return blockmanager.ErrNoBlock
 	}
 	return nil
 }
@@ -75,7 +81,7 @@ func (kvfm *KVFBlockManager) AllocBlock() (uint64, error) {
 	var cKey C.uint64_t
 	errcode := C.AllocBlock(&kvfm.h, &cKey)
 	if int(errcode) != 0 {
-		return 0, ErrNoMoreBlocks
+		return 0, blockmanager.ErrNoMoreBlocks
 	}
 	return uint64(cKey), nil
 }

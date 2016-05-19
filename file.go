@@ -6,6 +6,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/applepi-icpc/exfs/blockmanager"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 )
@@ -72,7 +73,7 @@ func (f *ExfsFile) Read(dest []byte, off int64) (fuse.ReadResult, fuse.Status) {
 
 	// read off:end
 	blkSize := int64(f.fs.blockManager.Blocksize())
-	if blkSize == int64(SizeUnlimited) {
+	if blkSize == int64(blockmanager.SizeUnlimited) {
 		if len(f.inode.Blocks) == 0 { // no blocks allocated
 			return fuse.ReadResultData(make([]byte, 0)), fuse.OK
 		} else {
@@ -195,7 +196,7 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 	} else { // newSize != 0
 		blkSize := f.fs.blockManager.Blocksize()
 
-		if blkSize == SizeUnlimited {
+		if blkSize == blockmanager.SizeUnlimited {
 			if len(f.inode.Blocks) == 0 { // alloc a block
 				blkID, err := f.fs.blockManager.AllocBlock()
 				if err != nil {
@@ -387,7 +388,7 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 
 	// write off:end
 	blkSize := int64(f.fs.blockManager.Blocksize())
-	if blkSize == int64(SizeUnlimited) {
+	if blkSize == int64(blockmanager.SizeUnlimited) {
 		if len(f.inode.Blocks) == 0 {
 			succeed = true
 			return 0, fuse.OK
@@ -538,7 +539,7 @@ func (f *ExfsFile) GetAttr(out *fuse.Attr) fuse.Status {
 
 	out.Size = f.inode.Size
 	blkSize := int64(f.fs.blockManager.Blocksize())
-	if blkSize != int64(SizeUnlimited) {
+	if blkSize != int64(blockmanager.SizeUnlimited) {
 		out.Blocks = uint64(len(f.inode.Blocks))
 		out.Blksize = uint32(blkSize)
 	}

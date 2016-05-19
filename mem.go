@@ -2,6 +2,8 @@ package main
 
 import (
 	"sync/atomic"
+
+	"github.com/applepi-icpc/exfs/blockmanager"
 )
 
 // A simple block manager
@@ -20,7 +22,7 @@ func NewMemBlockManager() *MemBlockManager {
 func (m *MemBlockManager) GetBlock(id uint64) ([]byte, error) {
 	res, ok := m.storage[id]
 	if !ok || res == nil {
-		return nil, ErrNoBlock
+		return nil, blockmanager.ErrNoBlock
 	}
 	resReplica := make([]byte, len(res))
 	copy(resReplica, res)
@@ -30,7 +32,7 @@ func (m *MemBlockManager) GetBlock(id uint64) ([]byte, error) {
 func (m *MemBlockManager) SetBlock(id uint64, blk []byte) error {
 	res, ok := m.storage[id]
 	if !ok || res == nil {
-		return ErrNoBlock
+		return blockmanager.ErrNoBlock
 	}
 	blkReplica := make([]byte, len(blk))
 	copy(blkReplica, blk)
@@ -41,7 +43,7 @@ func (m *MemBlockManager) SetBlock(id uint64, blk []byte) error {
 func (m *MemBlockManager) RemoveBlock(id uint64) error {
 	res, ok := m.storage[id]
 	if !ok || res == nil {
-		return ErrNoBlock
+		return blockmanager.ErrNoBlock
 	}
 	m.storage[id] = nil
 	return nil
@@ -54,7 +56,7 @@ func (m *MemBlockManager) AllocBlock() (uint64, error) {
 }
 
 func (m *MemBlockManager) Blocksize() uint64 {
-	return SizeUnlimited
+	return blockmanager.SizeUnlimited
 }
 
 func (m *MemBlockManager) Blockstat() (total uint64, used uint64, free uint64, avail uint64) {
