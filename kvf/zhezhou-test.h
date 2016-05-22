@@ -10,8 +10,8 @@
 #include "kvf.h"
 #include "kvf_api.h"
 
-#define MLBMSizeLimit  262144
-#define MLBMBlocks     4194304
+#define MLBMSizeLimit  65536
+#define MLBMBlocks     16777216
 
 
 struct KVFBlockManager{
@@ -23,6 +23,8 @@ struct KVFBlockManager{
 	uint64_t	usage;
 	uint64_t	key_num;	
 };
+
+// void string_t_allocator_init();
 
 int NewKVFBlockManager(char* name, struct KVFBlockManager* _ret);
 

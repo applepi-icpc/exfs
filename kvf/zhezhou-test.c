@@ -14,10 +14,39 @@
 
 #define KeySizeLimit 256
 
-static string_t* HDFS_gen_str(char* c_str, int len) {
-	string_t* s_str = malloc(sizeof(string_t));
+/* #define POOL_SIZE 1048576
+string_t POOL[POOL_SIZE];
+string_t* POOL_GC[POOL_SIZE];
+int POOL_GC_TOP = 0;
+
+void string_t_allocator_init() {
+	int i;
+	for (i = 0; i < POOL_SIZE; i++) {
+		POOL_GC[i] = &POOL[i];
+	}
+	POOL_GC_TOP = POOL_SIZE;
+}
+
+string_t* alloc_string_t() {
+	return POOL_GC[__sync_add_and_fetch(&POOL_GC_TOP, -1)];
+}
+
+void free_string_t(string_t* p) {
+	POOL_GC[__sync_fetch_and_add(&POOL_GC_TOP, 1)] = p;
+} */
+
+string_t* alloc_string_t() {
+	return (string_t *)malloc(sizeof(string_t));
+}
+
+void free_string_t(string_t* p) {
+	free((void *)p);
+}
+
+static string_t* HDFS_gen_str(char* c_str, int len, unsigned alloc_len) {
+	string_t* s_str = alloc_string_t();
 	s_str->len = len;
-	posix_memalign((void**) &(s_str->data), NVMKV_KVF_SECTOR_SIZE, NVMKV_KVF_MAX_VAL_LEN);
+	posix_memalign((void**) &(s_str->data), NVMKV_KVF_SECTOR_SIZE, alloc_len);
 	memset(s_str->data, 0, len);
 
 	if (c_str != NULL){
@@ -29,7 +58,7 @@ static string_t* HDFS_gen_str(char* c_str, int len) {
 #define HDR_LEN 4
 
 static string_t* HDFS_gen_str_with_len(char* c_str, unsigned int len) {
-	string_t* s_str = malloc(sizeof(string_t));
+	string_t* s_str = alloc_string_t();
 	int real_len = len + HDR_LEN;
 	s_str->len = real_len;
 	posix_memalign((void**) &(s_str->data), NVMKV_KVF_SECTOR_SIZE, NVMKV_KVF_MAX_VAL_LEN);
@@ -68,13 +97,11 @@ static void HDFS_del_str(string_t* s_str) {
 	if (s_str == NULL)
 		return;
 	free(s_str->data);
-	free(s_str);
+	free_string_t(s_str);
 }
 
-static void i_to_char(uint64_t int_in,char* char_in) {
-	char buffer[KeySizeLimit];
-	sprintf(buffer, "exblk_%d",int_in);
-	strcpy(char_in, (const char*)buffer);
+static void i_to_char(uint64_t int_in, char* char_in) {
+	sprintf(char_in, "exblk_%d",int_in);
 	return;
 }
 
@@ -124,17 +151,17 @@ int DestroyKVFBlockManager(struct KVFBlockManager* kbm) {
 // return a error number(default is 0, block not found is 1).
 int GetBlock(struct KVFBlockManager* kbm, uint64_t id, char** blk, uint64_t *blkLen) {
 	int ret = 0; 
-	char* id_char = (char*)malloc(KeySizeLimit);
+	char id_char[KeySizeLimit];
 	i_to_char(id, id_char);
-	string_t*	key_id = HDFS_gen_str((char*)id_char, strlen(id_char));
-	string_t*	val_emp = HDFS_gen_str(NULL, NVMKV_KVF_MAX_VAL_LEN);
+	string_t*	key_id = HDFS_gen_str((char*)id_char, strlen(id_char), NVMKV_KVF_MAX_KEY_LEN);
+	string_t*	val_emp = HDFS_gen_str(NULL, NVMKV_KVF_MAX_VAL_LEN, NVMKV_KVF_MAX_VAL_LEN);
 
 	get(kbm->pool, key_id, val_emp, kbm->props, NULL);
 	if(val_emp->data == NULL){
 		ret = 1;
 		HDFS_del_str(key_id);
 		HDFS_del_str(val_emp);
-		free(id_char);
+	
 		return ret;
 	}
 
@@ -145,8 +172,8 @@ int GetBlock(struct KVFBlockManager* kbm, uint64_t id, char** blk, uint64_t *blk
 	} else {
 		*blkLen = 0;
 	}
-	free(val_emp);
-	free(id_char);
+	free_string_t(val_emp);
+
 	return ret;
 }
 
@@ -154,30 +181,29 @@ int GetBlock(struct KVFBlockManager* kbm, uint64_t id, char** blk, uint64_t *blk
 // a error number(default is 0, block not found is 1, could not set block is 2).
 int SetBlock(struct KVFBlockManager* kbm, uint64_t id, char* blk, uint64_t blkLen) {
 	int error = 0;
-	char* id_char = (char*)malloc(KeySizeLimit);
+	char id_char[KeySizeLimit];
 	i_to_char(id, id_char);
 	
-	string_t*	key_id = HDFS_gen_str((char*)id_char, strlen(id_char));
+	string_t*	key_id = HDFS_gen_str((char*)id_char, strlen(id_char), NVMKV_KVF_MAX_KEY_LEN);
 	string_t*	val_input = HDFS_gen_str_with_len(blk, blkLen);;
-	string_t*	val_emp = HDFS_gen_str(NULL, NVMKV_KVF_MAX_VAL_LEN);
+	// string_t*	val_emp = HDFS_gen_str(NULL, NVMKV_KVF_MAX_VAL_LEN, NVMKV_KVF_MAX_VAL_LEN);
 
 	// TODO: Getting before putting leads to a performance pitfall
-	get(kbm->pool, key_id, val_emp, kbm->props, NULL);
+	/* get(kbm->pool, key_id, val_emp, kbm->props, NULL);
 	if(val_emp->data == NULL){
 		HDFS_del_str(key_id);
 		HDFS_del_str(val_input);
 		HDFS_del_str(val_emp);
-		free(id_char);
 		return 1;
-	}
+	} */
 
 	put(kbm->pool, key_id, val_input, kbm->props, NULL);
 	put(kbm->pool, key_id, val_input, kbm->props, NULL);
 
 	HDFS_del_str(key_id);
 	HDFS_del_str(val_input);
-	HDFS_del_str(val_emp);
-	free(id_char);
+	// HDFS_del_str(val_emp);
+
 	return 0;
 }
 
@@ -185,28 +211,28 @@ int SetBlock(struct KVFBlockManager* kbm, uint64_t id, char* blk, uint64_t blkLe
 // a error number(default is 0, block not found is 1, could not remove block is 2).
 int RemoveBlock(struct KVFBlockManager* kbm, uint64_t id) {
 	int error = 0;
-	char* id_char = (char*)malloc(KeySizeLimit);
+	char id_char[KeySizeLimit];
 	i_to_char(id, id_char);
 
-	string_t*	key_id = HDFS_gen_str((char*)id_char, strlen(id_char));
-	string_t*	val_emp = HDFS_gen_str(NULL, NVMKV_KVF_MAX_VAL_LEN);
+	string_t*	key_id = HDFS_gen_str((char*)id_char, strlen(id_char), NVMKV_KVF_MAX_KEY_LEN);
+	// string_t*	val_emp = HDFS_gen_str(NULL, NVMKV_KVF_MAX_VAL_LEN, NVMKV_KVF_MAX_VAL_LEN);
 
 	// TODO: Getting before removing leads to a performance pitfall
-	get(kbm->pool, key_id, val_emp, kbm->props, NULL);
+	/* get(kbm->pool, key_id, val_emp, kbm->props, NULL);
 	if(val_emp->data == NULL){
 		HDFS_del_str(key_id);
 		HDFS_del_str(val_emp);
-		free(id_char);
+	
 		return 1;
-	}
+	} */
 
 	del(kbm->pool, key_id, kbm->props, NULL);
 
 	__sync_add_and_fetch(&kbm->key_num,-1);
 	__sync_add_and_fetch(&kbm->usage,-1);
 	HDFS_del_str(key_id);
-	HDFS_del_str(val_emp);
-	free(id_char);
+	// HDFS_del_str(val_emp);
+
 	return 0;
 
 }
@@ -220,20 +246,18 @@ int AllocBlock(struct KVFBlockManager* kbm, uint64_t* key) {
 	__sync_add_and_fetch(&kbm->usage,1);
 	*key = id;
 
-	char* blk;
+	/* char* blk;
 	char* id_buffer = (char*)malloc(KeySizeLimit);
 	i_to_char(id, id_buffer);
 
-	string_t*	key_id = HDFS_gen_str((char*)id_buffer, strlen(id_buffer));
+	string_t*	key_id = HDFS_gen_str((char*)id_buffer, strlen(id_buffer), NVMKV_KVF_MAX_KEY_LEN);
 	string_t*	val_input = HDFS_gen_str_with_len("", 0);
-	string_t*   val_emp = HDFS_gen_str(NULL, NVMKV_KVF_MAX_VAL_LEN);
 
 	put(kbm->pool, key_id, val_input, kbm->props, NULL);
 	put(kbm->pool, key_id, val_input, kbm->props, NULL); // ?
 
 	HDFS_del_str(key_id);
-	HDFS_del_str(val_input);
-	HDFS_del_str(val_emp);
+	HDFS_del_str(val_input); */
 	return 0;
 
 }

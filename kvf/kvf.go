@@ -15,15 +15,21 @@ import (
 )
 
 const (
-	KVFSizeLimit = 262144
+	KVFSizeLimit = 65536
 )
 
 type KVFBlockManager struct {
-	h C.struct_KVFBlockManager
+	h          C.struct_KVFBlockManager
+	blockAvail map[uint64]struct{}
 }
+
+/* func init() {
+	C.string_t_allocator_init()
+} */
 
 func NewKVFBlockManager(name string) *KVFBlockManager {
 	ret := new(KVFBlockManager)
+	ret.blockAvail = make(map[uint64]struct{})
 	cName := C.CString(name)
 	C.NewKVFBlockManager(cName, &ret.h)
 	C.free(unsafe.Pointer(cName))
@@ -35,6 +41,10 @@ func (kvfm *KVFBlockManager) Destroy() {
 }
 
 func (kvfm *KVFBlockManager) GetBlock(id uint64) ([]byte, error) {
+	_, ok := kvfm.blockAvail[id]
+	if !ok {
+		return nil, blockmanager.ErrNoBlock
+	}
 	var (
 		cBlk    unsafe.Pointer
 		cBlkLen C.uint64_t
@@ -55,6 +65,10 @@ func (kvfm *KVFBlockManager) GetBlock(id uint64) ([]byte, error) {
 }
 
 func (kvfm *KVFBlockManager) SetBlock(id uint64, blk []byte) error {
+	_, ok := kvfm.blockAvail[id]
+	if !ok {
+		return blockmanager.ErrNoBlock
+	}
 	if len(blk) > KVFSizeLimit {
 		return blockmanager.ErrWriteTooLarge
 	}
@@ -70,10 +84,15 @@ func (kvfm *KVFBlockManager) SetBlock(id uint64, blk []byte) error {
 }
 
 func (kvfm *KVFBlockManager) RemoveBlock(id uint64) error {
+	_, ok := kvfm.blockAvail[id]
+	if !ok {
+		return blockmanager.ErrNoBlock
+	}
 	errcode := C.RemoveBlock(&kvfm.h, C.uint64_t(id))
 	if int(errcode) != 0 {
 		return blockmanager.ErrNoBlock
 	}
+	delete(kvfm.blockAvail, id)
 	return nil
 }
 
@@ -83,7 +102,9 @@ func (kvfm *KVFBlockManager) AllocBlock() (uint64, error) {
 	if int(errcode) != 0 {
 		return 0, blockmanager.ErrNoMoreBlocks
 	}
-	return uint64(cKey), nil
+	res := uint64(cKey)
+	kvfm.blockAvail[res] = struct{}{}
+	return res, nil
 }
 
 func (kvfm *KVFBlockManager) Blocksize() uint64 {
