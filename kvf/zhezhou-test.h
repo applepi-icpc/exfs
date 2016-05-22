@@ -10,7 +10,7 @@
 #include "kvf.h"
 #include "kvf_api.h"
 
-#define MLBMSizeLimit  524288
+#define MLBMSizeLimit  262144
 #define MLBMBlocks     4194304
 
 

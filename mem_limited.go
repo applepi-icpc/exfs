@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"sync/atomic"
 
 	"github.com/applepi-icpc/exfs/blockmanager"
@@ -10,10 +9,6 @@ import (
 const (
 	MLBMSizeLimit uint64 = 1048576
 )
-
-func init() {
-	fmt.Printf("EXFS: Running on limited mem block manager: %d bytes\n", MLBMSizeLimit)
-}
 
 // A simple block manager with size limit
 type MemLimitedBlockManager struct {

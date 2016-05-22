@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	log "github.com/Sirupsen/logrus"
+	"github.com/applepi-icpc/exfs/kvf"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 	"github.com/hanwen/go-fuse/fuse/pathfs"
@@ -34,7 +35,8 @@ func main() {
 	}
 
 	// fs, err := NewExfs(NewMemBlockManager(), 0, true)
-	fs, err := NewExfs(NewMemLimitedBlockManager(), uint32(uid), uint32(gid), 0, true)
+	// fs, err := NewExfs(NewMemLimitedBlockManager(), uint32(uid), uint32(gid), 0, true)
+	fs, err := NewExfs(kvf.NewKVFBlockManager("st_pool"), uint32(uid), uint32(gid), 0, true)
 	fs.SetDebug(true)
 	if err != nil {
 		log.Fatalf("Create FS failed: %v\n", err)
