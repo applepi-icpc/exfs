@@ -440,14 +440,18 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 					err    error
 				)
 
-				blk, err = f.fs.blockManager.GetBlock(f.inode.Blocks[firstBlk])
-				if err != nil {
-					f.fs.logReadBlkError(f.inode.Blocks[firstBlk], f.inodeBlkID, err)
-					return 0, fuse.EIO
+				if off-blkOff != 0 {
+					blk, err = f.fs.blockManager.GetBlock(f.inode.Blocks[firstBlk])
+					if err != nil {
+						f.fs.logReadBlkError(f.inode.Blocks[firstBlk], f.inodeBlkID, err)
+						return 0, fuse.EIO
+					}
+					blkOff = firstBlk * blkSize
+					leng = uint32(blkSize - (off - blkOff))
+					copy(blk[off-blkOff:], data[written:written+leng])
+				} else {
+					blk = data[written : written+uint32(blkSize)]
 				}
-				blkOff = firstBlk * blkSize
-				leng = uint32(blkSize - (off - blkOff))
-				copy(blk[off-blkOff:], data[written:written+leng])
 				err = f.fs.blockManager.SetBlock(f.inode.Blocks[firstBlk], blk)
 				// log.Infof("Write data[%d:%d] to block(%d)[%d:%d] (%d-th): %s", written, written+leng, f.inode.Blocks[firstBlk], off-blkOff, len(blk), firstBlk, sprintHeadTail(data[written:written+leng]))
 				if err != nil {
@@ -466,14 +470,19 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 					written += uint32(blkSize)
 				}
 
-				blk, err = f.fs.blockManager.GetBlock(f.inode.Blocks[lastBlk])
-				if err != nil {
-					f.fs.logReadBlkError(f.inode.Blocks[lastBlk], f.inodeBlkID, err)
-					return written, fuse.EIO
-				}
 				blkOff = lastBlk * blkSize
 				leng = uint32(end - blkOff) // 0 : end-blkOff
-				copy(blk[:leng], data[written:])
+				if leng != 0 {
+					blk, err = f.fs.blockManager.GetBlock(f.inode.Blocks[lastBlk])
+					if err != nil {
+						f.fs.logReadBlkError(f.inode.Blocks[lastBlk], f.inodeBlkID, err)
+						return written, fuse.EIO
+					}
+					copy(blk[:leng], data[written:])
+				} else {
+					blk = data[written:]
+				}
+
 				err = f.fs.blockManager.SetBlock(f.inode.Blocks[lastBlk], blk)
 				// log.Infof("Write data[%d:%d] to block(%d)[%d:%d] (%d-th): %s", written, len(data), f.inode.Blocks[lastBlk], 0, leng, lastBlk, sprintHeadTail(data[written:]))
 				if err != nil {
