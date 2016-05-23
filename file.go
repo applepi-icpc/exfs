@@ -6,6 +6,7 @@ import (
 	"syscall"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/applepi-icpc/exfs/blockmanager"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
@@ -14,6 +15,7 @@ import (
 // TODO: R/W buffer
 type ExfsFile struct {
 	fs *Exfs
+	bm blockmanager.BlockManager
 
 	inodeBlkID uint64
 	inode      *INode
@@ -25,6 +27,7 @@ type ExfsFile struct {
 func NewExfsFile(fs *Exfs, blkID uint64, inode *INode) *ExfsFile {
 	return &ExfsFile{
 		fs:         fs,
+		bm:         NewBlockBuffer(fs.blockManager),
 		inodeBlkID: blkID,
 		inode:      inode,
 		opening:    true,
@@ -72,12 +75,12 @@ func (f *ExfsFile) Read(dest []byte, off int64) (fuse.ReadResult, fuse.Status) {
 	}
 
 	// read off:end
-	blkSize := int64(f.fs.blockManager.Blocksize())
+	blkSize := int64(f.bm.Blocksize())
 	if blkSize == int64(blockmanager.SizeUnlimited) {
 		if len(f.inode.Blocks) == 0 { // no blocks allocated
 			return fuse.ReadResultData(make([]byte, 0)), fuse.OK
 		} else {
-			blk, err := f.fs.blockManager.GetBlock(f.inode.Blocks[0])
+			blk, err := f.bm.GetBlock(f.inode.Blocks[0])
 			if err != nil {
 				f.fs.logReadBlkError(f.inode.Blocks[0], f.inodeBlkID, err)
 				return fuse.ReadResultData(nil), fuse.EIO
@@ -92,7 +95,7 @@ func (f *ExfsFile) Read(dest []byte, off int64) (fuse.ReadResult, fuse.Status) {
 			firstBlk := off / blkSize
 			lastBlk := (end - 1) / blkSize
 			if firstBlk == lastBlk {
-				blk, err := f.fs.blockManager.GetBlock(f.inode.Blocks[firstBlk])
+				blk, err := f.bm.GetBlock(f.inode.Blocks[firstBlk])
 				if err != nil {
 					f.fs.logReadBlkError(f.inode.Blocks[firstBlk], f.inodeBlkID, err)
 					return fuse.ReadResultData(nil), fuse.EIO
@@ -110,7 +113,7 @@ func (f *ExfsFile) Read(dest []byte, off int64) (fuse.ReadResult, fuse.Status) {
 					err    error
 				)
 
-				blk, err = f.fs.blockManager.GetBlock(f.inode.Blocks[firstBlk])
+				blk, err = f.bm.GetBlock(f.inode.Blocks[firstBlk])
 				if err != nil {
 					f.fs.logReadBlkError(f.inode.Blocks[firstBlk], f.inodeBlkID, err)
 					return fuse.ReadResultData(nil), fuse.EIO
@@ -122,7 +125,7 @@ func (f *ExfsFile) Read(dest []byte, off int64) (fuse.ReadResult, fuse.Status) {
 				ptr += leng
 
 				for i := firstBlk + 1; i <= lastBlk-1; i++ {
-					blk, err = f.fs.blockManager.GetBlock(f.inode.Blocks[i])
+					blk, err = f.bm.GetBlock(f.inode.Blocks[i])
 					if err != nil {
 						f.fs.logReadBlkError(f.inode.Blocks[i], f.inodeBlkID, err)
 						return fuse.ReadResultData(nil), fuse.EIO
@@ -132,7 +135,7 @@ func (f *ExfsFile) Read(dest []byte, off int64) (fuse.ReadResult, fuse.Status) {
 					ptr += blkSize
 				}
 
-				blk, err = f.fs.blockManager.GetBlock(f.inode.Blocks[lastBlk])
+				blk, err = f.bm.GetBlock(f.inode.Blocks[lastBlk])
 				if err != nil {
 					f.fs.logReadBlkError(f.inode.Blocks[lastBlk], f.inodeBlkID, err)
 					return fuse.ReadResultData(nil), fuse.EIO
@@ -150,7 +153,7 @@ func (f *ExfsFile) Read(dest []byte, off int64) (fuse.ReadResult, fuse.Status) {
 
 func (f *ExfsFile) saveINode() (err error) {
 	inoB := f.inode.Marshal()
-	err = f.fs.blockManager.SetBlock(f.inodeBlkID, inoB)
+	err = f.bm.SetBlock(f.inodeBlkID, inoB)
 	return
 }
 
@@ -158,7 +161,7 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 	// log.Warnf("setSize file(%d): %d", f.inodeBlkID, newSize)
 
 	// If any operation failed, f.inode would remain unchanged.
-	// For f.fs.blockManager, it should support log to remain consistent.
+	// For f.bm, it should support log to remain consistent.
 
 	var err error
 
@@ -172,9 +175,9 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 		if !succeed {
 			f.inode.Size = oriSize
 			f.inode.Blocks = oriBlocks
-			// TODO: f.fs.blockManager.rollback()
+			// TODO: f.bm.rollback()
 		} else {
-			// TODO: f.fs.blockManager.commit()
+			// TODO: f.bm.commit()
 		}
 	}()
 
@@ -188,17 +191,17 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 
 		// deallocate all blocks
 		for _, blkID := range oriBlocks {
-			err = f.fs.blockManager.RemoveBlock(blkID)
+			err = f.bm.RemoveBlock(blkID)
 			if err != nil {
 				return err
 			}
 		}
 	} else { // newSize != 0
-		blkSize := f.fs.blockManager.Blocksize()
+		blkSize := f.bm.Blocksize()
 
 		if blkSize == blockmanager.SizeUnlimited {
 			if len(f.inode.Blocks) == 0 { // alloc a block
-				blkID, err := f.fs.blockManager.AllocBlock()
+				blkID, err := f.bm.AllocBlock()
 				if err != nil {
 					return err
 				}
@@ -211,7 +214,7 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 				}
 
 				blk := make([]byte, newSize)
-				err = f.fs.blockManager.SetBlock(blkID, blk)
+				err = f.bm.SetBlock(blkID, blk)
 				if err != nil {
 					return err
 				}
@@ -223,7 +226,7 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 				}
 
 				blkID := f.inode.Blocks[0]
-				blk, err := f.fs.blockManager.GetBlock(blkID)
+				blk, err := f.bm.GetBlock(blkID)
 				if err != nil {
 					return err
 				}
@@ -233,7 +236,7 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 				} else if uint64(len(blk)) > newSize {
 					blk = blk[:newSize]
 				}
-				err = f.fs.blockManager.SetBlock(blkID, blk)
+				err = f.bm.SetBlock(blkID, blk)
 				if err != nil {
 					return err
 				}
@@ -254,18 +257,18 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 						return err
 					}
 
-					blk, err := f.fs.blockManager.GetBlock(lastBlk)
+					blk, err := f.bm.GetBlock(lastBlk)
 					if err != nil {
 						return err
 					}
 					blk = append(blk, make([]byte, newSize-oriSize)...)
-					err = f.fs.blockManager.SetBlock(lastBlk, blk)
+					err = f.bm.SetBlock(lastBlk, blk)
 					if err != nil {
 						return err
 					}
 				} else { // alloc new blocks
 					for i := blkOri; i < blkNeeds; i++ {
-						blkID, err := f.fs.blockManager.AllocBlock()
+						blkID, err := f.bm.AllocBlock()
 						if err != nil {
 							return err
 						}
@@ -285,13 +288,13 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 					)
 
 					if blkOri > 0 {
-						blk, err = f.fs.blockManager.GetBlock(lastBlk)
+						blk, err = f.bm.GetBlock(lastBlk)
 						if err != nil {
 							return err
 						}
 						if uint64(len(blk)) < blkSize {
 							blk = append(blk, make([]byte, blkSize-uint64(len(blk)))...)
-							err = f.fs.blockManager.SetBlock(lastBlk, blk)
+							err = f.bm.SetBlock(lastBlk, blk)
 							if err != nil {
 								return err
 							}
@@ -301,12 +304,12 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 					// set new full blocks
 					for i := blkOri; i < blkNeeds-1; i++ {
 						blkID := f.inode.Blocks[i]
-						blk, err := f.fs.blockManager.GetBlock(blkID)
+						blk, err := f.bm.GetBlock(blkID)
 						if err != nil {
 							return err
 						}
 						blk = make([]byte, blkSize)
-						err = f.fs.blockManager.SetBlock(blkID, blk)
+						err = f.bm.SetBlock(blkID, blk)
 						if err != nil {
 							return err
 						}
@@ -315,7 +318,7 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 					// set new last block
 					blkID := f.inode.Blocks[blkNeeds-1]
 					blk = make([]byte, newSize-(blkNeeds-1)*blkSize)
-					err = f.fs.blockManager.SetBlock(blkID, blk)
+					err = f.bm.SetBlock(blkID, blk)
 					if err != nil {
 						return err
 					}
@@ -330,19 +333,19 @@ func (f *ExfsFile) setSize(newSize uint64) error {
 
 				for i := blkNeeds; i < blkOri; i++ {
 					blkID := oriBlocks[i]
-					err = f.fs.blockManager.RemoveBlock(blkID)
+					err = f.bm.RemoveBlock(blkID)
 					if err != nil {
 						return err
 					}
 				}
 
 				lastBlk := oriBlocks[blkNeeds-1]
-				blk, err := f.fs.blockManager.GetBlock(lastBlk)
+				blk, err := f.bm.GetBlock(lastBlk)
 				if err != nil {
 					return err
 				}
 				blk = blk[:newSize-(blkNeeds-1)*blkSize]
-				err = f.fs.blockManager.SetBlock(lastBlk, blk)
+				err = f.bm.SetBlock(lastBlk, blk)
 				if err != nil {
 					return err
 				}
@@ -365,9 +368,9 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 		if succeed {
 			f.inode.Mtime = uint64(time.Now().Unix())
 			f.saveINode()
-			// TODO: f.fs.blockManager.commit()
+			// TODO: f.bm.commit()
 		} else {
-			// TODO: f.fs.blockManager.rollback()
+			// TODO: f.bm.rollback()
 		}
 	}()
 
@@ -387,19 +390,19 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 	}
 
 	// write off:end
-	blkSize := int64(f.fs.blockManager.Blocksize())
+	blkSize := int64(f.bm.Blocksize())
 	if blkSize == int64(blockmanager.SizeUnlimited) {
 		if len(f.inode.Blocks) == 0 {
 			succeed = true
 			return 0, fuse.OK
 		} else {
-			blk, err := f.fs.blockManager.GetBlock(f.inode.Blocks[0])
+			blk, err := f.bm.GetBlock(f.inode.Blocks[0])
 			if err != nil {
 				f.fs.logReadBlkError(f.inode.Blocks[0], f.inodeBlkID, err)
 				return 0, fuse.EIO
 			}
 			copy(blk[off:end], data)
-			err = f.fs.blockManager.SetBlock(f.inode.Blocks[0], blk)
+			err = f.bm.SetBlock(f.inode.Blocks[0], blk)
 			if err != nil {
 				f.fs.logWriteBlkError(f.inode.Blocks[0], f.inodeBlkID, err)
 				return 0, fuse.EIO
@@ -415,7 +418,7 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 			firstBlk := off / blkSize
 			lastBlk := (end - 1) / blkSize
 			if firstBlk == lastBlk {
-				blk, err := f.fs.blockManager.GetBlock(f.inode.Blocks[firstBlk])
+				blk, err := f.bm.GetBlock(f.inode.Blocks[firstBlk])
 				if err != nil {
 					f.fs.logReadBlkError(f.inode.Blocks[firstBlk], f.inodeBlkID, err)
 					return 0, fuse.EIO
@@ -423,7 +426,7 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 
 				blkOff := firstBlk * blkSize
 				copy(blk[off-blkOff:end-blkOff], data)
-				err = f.fs.blockManager.SetBlock(f.inode.Blocks[firstBlk], blk)
+				err = f.bm.SetBlock(f.inode.Blocks[firstBlk], blk)
 				if err != nil {
 					f.fs.logWriteBlkError(f.inode.Blocks[firstBlk], f.inodeBlkID, err)
 					return 0, fuse.EIO
@@ -441,7 +444,7 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 				)
 
 				if off-blkOff != 0 {
-					blk, err = f.fs.blockManager.GetBlock(f.inode.Blocks[firstBlk])
+					blk, err = f.bm.GetBlock(f.inode.Blocks[firstBlk])
 					if err != nil {
 						f.fs.logReadBlkError(f.inode.Blocks[firstBlk], f.inodeBlkID, err)
 						return 0, fuse.EIO
@@ -452,7 +455,7 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 				} else {
 					blk = data[written : written+uint32(blkSize)]
 				}
-				err = f.fs.blockManager.SetBlock(f.inode.Blocks[firstBlk], blk)
+				err = f.bm.SetBlock(f.inode.Blocks[firstBlk], blk)
 				// log.Infof("Write data[%d:%d] to block(%d)[%d:%d] (%d-th): %s", written, written+leng, f.inode.Blocks[firstBlk], off-blkOff, len(blk), firstBlk, sprintHeadTail(data[written:written+leng]))
 				if err != nil {
 					f.fs.logWriteBlkError(f.inode.Blocks[firstBlk], f.inodeBlkID, err)
@@ -461,7 +464,7 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 				written += leng
 
 				for i := firstBlk + 1; i <= lastBlk-1; i++ {
-					err := f.fs.blockManager.SetBlock(f.inode.Blocks[i], data[written:written+uint32(blkSize)])
+					err := f.bm.SetBlock(f.inode.Blocks[i], data[written:written+uint32(blkSize)])
 					// log.Infof("Write data[%d:%d] to block(%d)[%d:%d] (%d-th): %s", written, written+uint32(blkSize), f.inode.Blocks[i], 0, blkSize, i, sprintHeadTail(data[written:written+uint32(blkSize)]))
 					if err != nil {
 						f.fs.logWriteBlkError(f.inode.Blocks[i], f.inodeBlkID, err)
@@ -473,7 +476,7 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 				blkOff = lastBlk * blkSize
 				leng = uint32(end - blkOff) // 0 : end-blkOff
 				if leng != 0 {
-					blk, err = f.fs.blockManager.GetBlock(f.inode.Blocks[lastBlk])
+					blk, err = f.bm.GetBlock(f.inode.Blocks[lastBlk])
 					if err != nil {
 						f.fs.logReadBlkError(f.inode.Blocks[lastBlk], f.inodeBlkID, err)
 						return written, fuse.EIO
@@ -483,7 +486,7 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 					blk = data[written:]
 				}
 
-				err = f.fs.blockManager.SetBlock(f.inode.Blocks[lastBlk], blk)
+				err = f.bm.SetBlock(f.inode.Blocks[lastBlk], blk)
 				// log.Infof("Write data[%d:%d] to block(%d)[%d:%d] (%d-th): %s", written, len(data), f.inode.Blocks[lastBlk], 0, leng, lastBlk, sprintHeadTail(data[written:]))
 				if err != nil {
 					f.fs.logWriteBlkError(f.inode.Blocks[lastBlk], f.inodeBlkID, err)
@@ -499,6 +502,13 @@ func (f *ExfsFile) Write(data []byte, off int64) (written uint32, code fuse.Stat
 }
 
 func (f *ExfsFile) Flush() fuse.Status {
+	if bb, ok := f.bm.(*BlockBuffer); ok {
+		err := bb.Flush()
+		if err != nil {
+			log.Errorf("Failed to flush file(%d): %s", f.inodeBlkID, err.Error())
+			return fuse.EIO
+		}
+	}
 	return fuse.OK
 }
 
@@ -547,7 +557,7 @@ func (f *ExfsFile) GetAttr(out *fuse.Attr) fuse.Status {
 	// defer f.lock.RUnlock()
 
 	out.Size = f.inode.Size
-	blkSize := int64(f.fs.blockManager.Blocksize())
+	blkSize := int64(f.bm.Blocksize())
 	if blkSize != int64(blockmanager.SizeUnlimited) {
 		out.Blocks = uint64(len(f.inode.Blocks))
 		out.Blksize = uint32(blkSize)

@@ -10,8 +10,8 @@
 #include "kvf.h"
 #include "kvf_api.h"
 
-#define MLBMSizeLimit  65536
-#define MLBMBlocks     16777216
+#define MLBMSizeLimit  262144
+#define MLBMBlocks     2097152
 
 
 struct KVFBlockManager{

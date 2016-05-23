@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	KVFSizeLimit = 65536
+	KVFSizeLimit = 262144
 )
 
 type KVFBlockManager struct {
