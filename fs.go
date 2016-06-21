@@ -65,8 +65,10 @@ func NewExfs(blockManager blockmanager.BlockManager, uid uint32, gid uint32, roo
 		files:        0,
 	}
 
+	saveLoader, persist := blockManager.(blockmanager.PersistentClass)
+
 	// initialize: make a root
-	if newFS {
+	if newFS || !persist {
 		blkID, ino, status := fs.createINode(0755|uint32(syscall.S_IFDIR), uid, gid)
 		if status != fuse.OK {
 			err := fmt.Errorf("Failed to make inode for FS root: status %d", status)
@@ -82,9 +84,30 @@ func NewExfs(blockManager blockmanager.BlockManager, uid uint32, gid uint32, roo
 			return nil, err
 		}
 		fs.root = blkID
+		fs.Store()
+	} else {
+		root, files, err := saveLoader.Load()
+		if err != nil {
+			return nil, err
+		}
+		fs.root = root
+		fs.files = files
 	}
 
 	return fs, nil
+}
+
+// errors would be ignored
+func (fs *Exfs) Store() {
+	bm := fs.blockManager
+	saveLoader, persist := bm.(blockmanager.PersistentClass)
+	if persist {
+		err := saveLoader.Store(fs.root, fs.files)
+		if err != nil {
+			log.Errorf("Failed to store into blockmanager: %s", err.Error())
+		}
+		// log.Infof("Stored into blockmanager")
+	}
 }
 
 func (fs *Exfs) createINode(mode uint32, uid uint32, gid uint32) (blkID uint64, ino *INode, status fuse.Status) {
@@ -124,6 +147,7 @@ func (fs *Exfs) createINode(mode uint32, uid uint32, gid uint32) (blkID uint64, 
 	}
 
 	fs.files += 1
+	fs.Store()
 
 	return
 }
@@ -216,7 +240,7 @@ func (fs *Exfs) getINode(name string, context *fuse.Context) (blkID uint64, ino 
 		// is it a directory?
 		if inode.Mode&uint32(syscall.S_IFDIR) == 0 {
 			err := fmt.Errorf("File(%d) is not a directory", currentBlkID)
-			log.Error(err)
+			log.Warn(err)
 			return 0, nil, fuse.ENOTDIR
 		}
 
@@ -242,7 +266,7 @@ func (fs *Exfs) getINode(name string, context *fuse.Context) (blkID uint64, ino 
 		}
 		nextID, err := dirEntries.FindEntry(v)
 		if err != nil {
-			log.Errorf("Failed to find '%s' in directory(%d): %s", v, currentBlkID, err.Error())
+			log.Warnf("Failed to find '%s' in directory(%d): %s", v, currentBlkID, err.Error())
 			return 0, nil, fuse.ENOENT
 		}
 
@@ -558,6 +582,7 @@ func (fs *Exfs) Rename(oldName string, newName string, context *fuse.Context) (c
 			}
 			fs.blockManager.RemoveBlock(v.INodeID)
 			fs.files -= 1
+			fs.Store()
 
 			*nDirEntries = append((*nDirEntries)[:k], (*nDirEntries)[k+1:]...)
 			break
@@ -658,6 +683,7 @@ func (fs *Exfs) Rmdir(name string, context *fuse.Context) (code fuse.Status) {
 			}
 			fs.blockManager.RemoveBlock(v.INodeID)
 			fs.files -= 1
+			fs.Store()
 
 			dirEntries = append(dirEntries[:k], dirEntries[k+1:]...)
 			found = true
@@ -723,6 +749,7 @@ func (fs *Exfs) Unlink(name string, context *fuse.Context) (code fuse.Status) {
 			}
 			fs.blockManager.RemoveBlock(v.INodeID)
 			fs.files -= 1
+			fs.Store()
 
 			dirEntries = append(dirEntries[:k], dirEntries[k+1:]...)
 			found = true
@@ -826,6 +853,7 @@ func (fs *Exfs) Create(name string, flags uint32, mode uint32, context *fuse.Con
 			}
 			fs.blockManager.RemoveBlock(v.INodeID)
 			fs.files -= 1
+			fs.Store()
 
 			dirEntries = append(dirEntries[:k], dirEntries[k+1:]...)
 			break

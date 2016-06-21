@@ -109,9 +109,8 @@ static void i_to_char(uint64_t int_in, char* char_in) {
 // a pointer of new KVFBlockManager.
 // Return error number(default 0).
 int NewKVFBlockManager(char* name, struct KVFBlockManager* _ret) {
-	_ret->currentID = 0;
+	_ret->currentID = 1;
 	_ret->usage = 0;
-	_ret->key_num = 0;
     _ret->pool_name = 	malloc(strlen(name)+1);
     _ret->kvf = 		malloc(sizeof(kvf_type_t));
 	_ret->pool = 		malloc(sizeof(pool_t));
@@ -228,7 +227,6 @@ int RemoveBlock(struct KVFBlockManager* kbm, uint64_t id) {
 
 	del(kbm->pool, key_id, kbm->props, NULL);
 
-	__sync_add_and_fetch(&kbm->key_num,-1);
 	__sync_add_and_fetch(&kbm->usage,-1);
 	HDFS_del_str(key_id);
 	// HDFS_del_str(val_emp);
@@ -242,7 +240,6 @@ int RemoveBlock(struct KVFBlockManager* kbm, uint64_t id) {
 int AllocBlock(struct KVFBlockManager* kbm, uint64_t* key) {
 	int error = 0;
 	uint64_t id = __sync_add_and_fetch(&kbm->currentID,1);
-	__sync_add_and_fetch(&kbm->key_num,1);
 	__sync_add_and_fetch(&kbm->usage,1);
 	*key = id;
 

@@ -24,3 +24,9 @@ type BlockManager interface {
 	// free: free blocks; avail: free blocks available to unprivileged user
 	Blockstat() (total uint64, used uint64, free uint64, avail uint64)
 }
+
+// If a block implemented this interface, its data could be persistent
+type PersistentClass interface {
+	Store(root uint64, files uint64) error
+	Load() (root uint64, files uint64, err error)
+}

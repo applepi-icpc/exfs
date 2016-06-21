@@ -20,8 +20,7 @@ struct KVFBlockManager{
 	pool_t*         pool;
 	kv_props_t*	props;
 	uint64_t  	currentID;	
-	uint64_t	usage;
-	uint64_t	key_num;	
+	uint64_t	usage;	
 };
 
 // void string_t_allocator_init();

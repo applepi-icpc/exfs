@@ -15,6 +15,7 @@ import (
 var (
 	flagMountPoint = flag.String("p", "./fs", "Mount point")
 	flagAllowOther = flag.Bool("allow_other", false, "Allow other users to access")
+	flagFormat     = flag.Bool("format", false, "Format FS")
 )
 
 func main() {
@@ -36,7 +37,7 @@ func main() {
 
 	// fs, err := NewExfs(NewMemBlockManager(), 0, true)
 	// fs, err := NewExfs(NewMemLimitedBlockManager(), uint32(uid), uint32(gid), 0, true)
-	fs, err := NewExfs(kvf.NewKVFBlockManager("st_pool"), uint32(uid), uint32(gid), 0, true)
+	fs, err := NewExfs(kvf.NewKVFBlockManager("st_pool"), uint32(uid), uint32(gid), 0, *flagFormat)
 	fs.SetDebug(true)
 	if err != nil {
 		log.Fatalf("Create FS failed: %v\n", err)
